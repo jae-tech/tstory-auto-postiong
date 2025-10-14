@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  # =========================================================
+  # PostgreSQL 데이터베이스 서비스 (로컬 개발 환경)
+  # =========================================================
+  # 로컬 개발 시 이 서비스만 실행: docker-compose up -d postgres
+  # 전체 스택 실행: docker-compose up -d
+  postgres:
+    image: postgres:16-alpine
+    container_name: tstory-postgres
+    environment:
+      # 데이터베이스 초기 설정 (.env 파일에서 값 주입)
+      POSTGRES_DB: ${DB_NAME:-tstory_automation}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      # 한글 지원을 위한 로케일 설정
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --locale=C"
+    volumes:
+      # 데이터 영속성: 호스트 볼륨에 DB 데이터 저장
+      - postgres_data:/var/lib/postgresql/data
+      # 초기 스키마 자동 실행 (있는 경우)
+      - ./prisma/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    ports:
+      # 호스트:컨테이너 포트 매핑 (로컬에서 localhost:5432로 접속 가능)
+      - "5432:5432"
+    healthcheck:
+      # DB 준비 상태 확인 (다른 서비스가 DB 대기 시 사용)
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-tstory_automation}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - tstory-network
+
+  # =========================================================
+  # NestJS 애플리케이션 서비스 (프로덕션 배포)
+  # =========================================================
+  # 로컬 개발 시에는 호스트에서 직접 실행하고, DB만 Docker로 사용
+  # 프로덕션 배포 시에만 이 서비스 사용
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tstory-automation
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      # 런타임 환경 설정
+      NODE_ENV: production
+      PORT: 3000
+      # Prisma DATABASE_URL 형식으로 DB 연결
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/${DB_NAME:-tstory_automation}
+      # 크롤러 설정
+      CRAWLER_TARGET_URL: ${CRAWLER_TARGET_URL}
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium-browser
+      PUPPETEER_HEADLESS: "true"
+      # AI 분석기 설정
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-pro}
+      # 티스토리 계정 정보
+      TISTORY_ID: ${TISTORY_ID}
+      TISTORY_PASSWORD: ${TISTORY_PASSWORD}
+      TISTORY_BLOG_URL: ${TISTORY_BLOG_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tstory-network
+    # 프로덕션 배포 시에만 활성화
+    profiles:
+      - production
+
+# =========================================================
+# 볼륨 정의 (데이터 영속성)
+# =========================================================
+volumes:
+  postgres_data:
+    driver: local
+    # 볼륨 이름: tstory_postgres_data
+
+# =========================================================
+# 네트워크 정의
+# =========================================================
+networks:
+  tstory-network:
+    driver: bridge
