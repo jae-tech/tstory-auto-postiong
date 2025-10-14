@@ -1,0 +1,100 @@
+// ===================================================================
+// Prisma 스키마: OCI A1 기반 알뜰폰 자동 포스팅 시스템
+// 데이터베이스: PostgreSQL
+// ===================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===================================================================
+// RawPlan: 크롤링된 원천 요금제 데이터
+// ===================================================================
+model RawPlan {
+  id        Int      @id @default(autoincrement())
+
+  // 요금제 고유 식별자 (예: "KT-알뜰-5GB-25000")
+  planId    String   @unique @db.VarChar(255)
+
+  // 요금제 기본 정보
+  planName  String   @db.VarChar(500)
+  carrier   String   @db.VarChar(100)  // 통신사 (예: KT, SKT, LG U+)
+  dataAmount String?  @db.VarChar(100) // 데이터 용량 (예: "5GB", "무제한")
+  price     Int?                        // 월 요금 (원)
+
+  // 프로모션 정보
+  promotionEndDate DateTime? // 프로모션 종료일
+
+  // 원본 데이터 (JSON 형태로 저장)
+  rawData   Json     @db.JsonB
+
+  // 처리 상태
+  isProcessed Boolean  @default(false)
+  processedAt DateTime?
+
+  // 타임스탬프
+  crawledAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 관계: 이 요금제로부터 생성된 포스트들
+  postQueue PostQueue[]
+
+  // 인덱스: 조회 성능 최적화
+  @@index([planId])
+  @@index([isProcessed])
+  @@index([crawledAt(sort: Desc)])
+  @@index([carrier])
+  @@map("raw_plans")
+}
+
+// ===================================================================
+// PostQueue: AI 분석 완료 후 발행 대기 중인 포스트
+// ===================================================================
+model PostQueue {
+  id        Int      @id @default(autoincrement())
+
+  // 원본 요금제 참조 (nullable: 수동 포스트 가능)
+  rawPlanId Int?
+  rawPlan   RawPlan? @relation(fields: [rawPlanId], references: [id], onDelete: SetNull)
+
+  // 포스트 콘텐츠
+  title     String   @db.VarChar(500)  // 포스트 제목
+  htmlBody  String   @db.Text          // HTML 형식의 본문
+  tags      String[]                   // 태그 배열
+
+  // 발행 상태
+  status    PostStatus @default(PENDING)
+
+  // 실패 처리
+  failureLog String?  @db.Text  // 실패 시 에러 로그
+  retryCount Int      @default(0)
+
+  // 스케줄 정보
+  scheduledAt DateTime? // 예약 발행 시간
+  publishedAt DateTime? // 실제 발행 시간
+
+  // 타임스탬프
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 인덱스: 발행 대기 큐 조회 최적화
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([createdAt(sort: Desc)])
+  @@map("post_queue")
+}
+
+// ===================================================================
+// PostStatus: 포스트 발행 상태 열거형
+// ===================================================================
+enum PostStatus {
+  PENDING   // 발행 대기 중
+  PUBLISHED // 발행 완료
+  FAILED    // 발행 실패
+}
