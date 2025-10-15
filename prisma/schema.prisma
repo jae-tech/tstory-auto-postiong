@@ -13,55 +13,100 @@ datasource db {
 }
 
 // ===================================================================
-// RawPlan: 크롤링된 원천 요금제 데이터
+// RawPlan: 크롤러가 수집한 원본 요금제 정보
 // ===================================================================
 model RawPlan {
-  id        Int      @id @default(autoincrement())
+  // --- 주요 식별자 및 시간 관리 ---
+  id          Int      @id @default(autoincrement())
+  planId      String   @unique @db.VarChar(255) // 요금제 고유 ID (Upsert 기준)
+  dataHash    String   @unique @db.VarChar(64)  // (필수) 요금제 스펙을 조합한 해시 값. 데이터 변경 감지 기준
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  // 요금제 고유 식별자 (예: "KT-알뜰-5GB-25000")
-  planId    String   @unique @db.VarChar(255)
+  // --- 핵심 요금 정보 ---
+  mvno        String   @db.VarChar(100) // 알뜰폰 사업자 이름
+  network     String   @db.VarChar(50)  // 사용 통신망 (SKT, KT, LGU+)
 
-  // 요금제 기본 정보
-  planName  String   @db.VarChar(500)
-  carrier   String   @db.VarChar(100)  // 통신사 (예: KT, SKT, LG U+)
-  dataAmount String?  @db.VarChar(100) // 데이터 용량 (예: "5GB", "무제한")
-  price     Int?                        // 월 요금 (원)
+  // 통신 기술: LTE 또는 5G
+  technology  String   @db.VarChar(50)  // LTE 또는 5G
 
-  // 프로모션 정보
-  promotionEndDate DateTime? // 프로모션 종료일
+  pricePromo     Int   // 현재 할인 적용된 월 요금
+  priceOriginal  Int?  // 할인 전 원가
 
-  // 원본 데이터 (JSON 형태로 저장)
-  rawData   Json     @db.JsonB
+  // 프로모션 및 할인 기간
+  promotionDurationMonths Int?      // 몇 개월간 할인 가격이 유지되는지 (숫자)
+  promotionEndDate        DateTime? // 프로모션 종료일
 
-  // 처리 상태
-  isProcessed Boolean  @default(false)
-  processedAt DateTime?
+  // --- 데이터/통화 스펙 ---
+  dataBaseGB        Float // 기본 제공 데이터량 (GB)
+  dataPostSpeedMbps Int?  // 기본 소진 후 제한 속도 (Mbps). 무제한이 아니면 null
+  talkMinutes       Int   // 통화 제공량 (분)
+  smsCount          Int   // 문자 제공량 (건)
 
-  // 타임스탬프
-  crawledAt DateTime @default(now())
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // --- 혜택 및 관계 ---
+  benefitSummary String? @db.Text // 부가 혜택 요약
 
-  // 관계: 이 요금제로부터 생성된 포스트들
-  postQueue PostQueue[]
+  // 관계: 이 요금제가 포함된 랭킹 스냅샷들
+  rankingSnapshots RankingSnapshot[] @relation("RankedPlans")
 
   // 인덱스: 조회 성능 최적화
   @@index([planId])
-  @@index([isProcessed])
-  @@index([crawledAt(sort: Desc)])
-  @@index([carrier])
+  @@index([dataHash])
+  @@index([mvno])
+  @@index([network])
+  @@index([technology])
+  @@index([pricePromo])
+  @@index([createdAt(sort: Desc)])
   @@map("raw_plans")
 }
 
 // ===================================================================
-// PostQueue: AI 분석 완료 후 발행 대기 중인 포스트
+// RankingSnapshot: AI 분석 결과 - 주간 추천 목록 추적
+// ===================================================================
+model RankingSnapshot {
+  id          Int      @id @default(autoincrement())
+
+  // 추천 목록 고유 해시 (TOP N 요금제 planId 조합의 해시)
+  rankingHash String   @unique @db.VarChar(64)
+
+  // AI 분석 메타 정보
+  analysisDate DateTime @default(now())  // 분석 수행 일시
+  topCount     Int      @default(10)     // 선정된 추천 요금제 개수
+
+  // 선정된 요금제 목록 (Many-to-Many)
+  rankedPlans  RawPlan[] @relation("RankedPlans")
+
+  // AI 분석 결과 상세 (JSON)
+  analysisData Json     @db.JsonB
+
+  // 이 랭킹을 기반으로 생성된 포스트
+  postQueue    PostQueue?
+
+  // 타임스탬프
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // 인덱스: 주간 분석 조회
+  @@index([rankingHash])
+  @@index([analysisDate(sort: Desc)])
+  @@map("ranking_snapshots")
+}
+
+// ===================================================================
+// PostQueue: 발행/수정 작업 큐
 // ===================================================================
 model PostQueue {
   id        Int      @id @default(autoincrement())
 
-  // 원본 요금제 참조 (nullable: 수동 포스트 가능)
-  rawPlanId Int?
-  rawPlan   RawPlan? @relation(fields: [rawPlanId], references: [id], onDelete: SetNull)
+  // 작업 유형 (신규 작성 vs 기존 글 수정)
+  postType  PostType @default(NEW_POST)
+
+  // 기존 포스트 수정 시: 티스토리 포스트 ID
+  originalPostId String? @db.VarChar(255)
+
+  // 기반이 된 랭킹 스냅샷 (1:1 관계)
+  rankingSnapshotId Int?              @unique
+  rankingSnapshot   RankingSnapshot?  @relation(fields: [rankingSnapshotId], references: [id], onDelete: SetNull)
 
   // 포스트 콘텐츠
   title     String   @db.VarChar(500)  // 포스트 제목
@@ -85,9 +130,18 @@ model PostQueue {
 
   // 인덱스: 발행 대기 큐 조회 최적화
   @@index([status])
+  @@index([postType])
   @@index([scheduledAt])
   @@index([createdAt(sort: Desc)])
   @@map("post_queue")
+}
+
+// ===================================================================
+// PostType: 포스트 작업 유형 열거형
+// ===================================================================
+enum PostType {
+  NEW_POST  // 신규 포스트 작성
+  REVISION  // 기존 포스트 수정
 }
 
 // ===================================================================

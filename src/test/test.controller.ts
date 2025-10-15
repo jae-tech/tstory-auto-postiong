@@ -29,15 +29,11 @@ export class TestController {
    * @returns 크롤링 결과 및 DB Upsert 정보
    */
   @Post('run-crawler')
-  async runCrawler(
-    @Query('useDemo') useDemo?: string,
-  ): Promise<CrawlerTestResult> {
+  async runCrawler(@Query('useDemo') useDemo?: string): Promise<CrawlerTestResult> {
     // 쿼리 파라미터를 boolean으로 변환 (기본값: true)
     const useDemoMode = useDemo === 'false' ? false : true;
 
-    this.logger.log(
-      `크롤러 테스트 요청 수신 (더미 모드: ${useDemoMode ? 'ON' : 'OFF'})`,
-    );
+    this.logger.log(`크롤러 테스트 요청 수신 (더미 모드: ${useDemoMode ? 'ON' : 'OFF'})`);
 
     const result = await this.testService.runCrawlerTest(useDemoMode);
 

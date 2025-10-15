@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import { chromium, Browser, Page } from 'playwright';
 import { PrismaService } from '@/prisma/prisma.service';
 import { PostQueue, PostStatus } from '@prisma/client';
 

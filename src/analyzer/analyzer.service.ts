@@ -33,15 +33,13 @@ export class AnalyzerService {
   }
 
   /**
-   * 데이터베이스에서 미처리 요금제 조회
+   * 데이터베이스에서 최근 요금제 조회
+   * (새 스키마에는 isProcessed 필드가 없으므로 최신 데이터 조회)
    */
   async getUnprocessedPlans(): Promise<RawPlan[]> {
     return await this.prisma.rawPlan.findMany({
-      where: {
-        isProcessed: false,
-      },
       orderBy: {
-        crawledAt: 'asc',
+        createdAt: 'desc',
       },
       take: 10, // 배치 단위로 처리
     });
@@ -54,10 +52,15 @@ export class AnalyzerService {
     const prompt = `당신은 알뜰폰 요금제 전문 블로거입니다. 다음 요금제 정보를 바탕으로 티스토리 블로그 포스팅을 작성해주세요.
 
 요금제 정보:
-- 요금제명: ${plan.planName}
-- 통신사: ${plan.carrier}
-- 데이터: ${plan.dataAmount || '정보 없음'}
-- 가격: ${plan.price ? plan.price.toLocaleString() + '원' : '정보 없음'}
+- 알뜰폰 사업자: ${plan.mvno}
+- 통신망: ${plan.network}
+- 통신 기술: ${plan.technology}
+- 데이터: ${plan.dataBaseGB === 999 ? '무제한' : plan.dataBaseGB + 'GB'}
+- 가격: ${plan.pricePromo.toLocaleString()}원
+- 원가: ${plan.priceOriginal ? plan.priceOriginal.toLocaleString() + '원' : '동일'}
+- 통화: ${plan.talkMinutes === 9999 ? '무제한' : plan.talkMinutes + '분'}
+- 문자: ${plan.smsCount === 9999 ? '무제한' : plan.smsCount + '건'}
+- 혜택: ${plan.benefitSummary || '없음'}
 
 작성 요구사항:
 1. 매력적이고 클릭을 유도하는 제목 작성 (35자 이내)
@@ -84,7 +87,7 @@ JSON 형식만 응답하고 다른 텍스트는 포함하지 마세요.`;
    * Gemini API를 사용하여 요금제 분석
    */
   async analyzeWithGemini(plan: RawPlan): Promise<AnalyzedPost> {
-    this.logger.log(`요금제 분석 중: ${plan.planName}`);
+    this.logger.log(`요금제 분석 중: ${plan.mvno} - ${plan.planId}`);
 
     try {
       const model = await this.genAI.models;
@@ -109,7 +112,7 @@ JSON 형식만 응답하고 다른 텍스트는 포함하지 마세요.`;
         throw new Error('Gemini 응답 구조가 유효하지 않음');
       }
 
-      this.logger.log(`요금제 분석 완료: ${plan.planName}`);
+      this.logger.log(`요금제 분석 완료: ${plan.mvno} - ${plan.planId}`);
       return parsed;
     } catch (error) {
       this.logger.error(`요금제 분석 실패 ${plan.id}:`, error);
@@ -122,27 +125,14 @@ JSON 형식만 응답하고 다른 텍스트는 포함하지 마세요.`;
    */
   async saveToQueue(planId: number, analyzedPost: AnalyzedPost): Promise<void> {
     try {
-      // 트랜잭션으로 원자성 보장
-      await this.prisma.$transaction(async (tx) => {
-        // 포스트 큐에 추가
-        await tx.postQueue.create({
-          data: {
-            rawPlanId: planId,
-            title: analyzedPost.title,
-            htmlBody: analyzedPost.htmlBody,
-            tags: analyzedPost.tags,
-            status: 'PENDING',
-          },
-        });
-
-        // 원본 요금제를 처리 완료로 표시
-        await tx.rawPlan.update({
-          where: { id: planId },
-          data: {
-            isProcessed: true,
-            processedAt: new Date(),
-          },
-        });
+      // 포스트 큐에 추가 (새 스키마에서는 rankingSnapshot 기반)
+      await this.prisma.postQueue.create({
+        data: {
+          title: analyzedPost.title,
+          htmlBody: analyzedPost.htmlBody,
+          tags: analyzedPost.tags,
+          status: 'PENDING',
+        },
       });
 
       this.logger.log(`큐에 저장 완료: Plan ID ${planId}`);
