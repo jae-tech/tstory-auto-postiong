@@ -1,5 +1,5 @@
 import { Controller, Post, Get, Query, Logger } from '@nestjs/common';
-import { TestService, CrawlerTestResult } from './test.service';
+import { TestService, CrawlerTestResult, AnalyzerTestResult } from './test.service';
 
 /**
  * 테스트 컨트롤러: 크롤러 기능을 HTTP 요청으로 테스트
@@ -63,6 +63,28 @@ export class TestController {
   }
 
   /**
+   * Gemini 일괄 분석 테스트 엔드포인트
+   *
+   * POST /test/run-gemini
+   *
+   * DB의 모든 요금제 데이터를 Gemini API로 일괄 분석합니다.
+   * Gemini가 가장 적합한 요금제를 선택하고 포스팅을 생성합니다.
+   *
+   * @returns Gemini 일괄 분석 결과
+   */
+  @Post('run-gemini')
+  async runGemini(): Promise<AnalyzerTestResult> {
+    this.logger.log(`Gemini 일괄 분석 테스트 요청 수신`);
+
+    const result = await this.testService.runGeminiTest();
+
+    this.logger.log(`Gemini 일괄 분석 테스트 응답: ${result.message}`);
+
+    return result;
+  }
+
+
+  /**
    * 테스트 모듈 정보 엔드포인트
    *
    * GET /test
@@ -82,7 +104,7 @@ export class TestController {
     }>;
   } {
     return {
-      message: '크롤러 테스트 API',
+      message: '크롤러 및 분석기 테스트 API',
       endpoints: [
         {
           method: 'GET',
@@ -107,6 +129,12 @@ export class TestController {
           path: '/test/run-crawler?useDemo=false',
           description: '크롤러 실행 (실제 크롤링)',
           example: 'POST http://localhost:3000/test/run-crawler?useDemo=false',
+        },
+        {
+          method: 'POST',
+          path: '/test/run-gemini',
+          description: 'Gemini 비교형 블로그 생성 테스트 (5개 테마별 TOP 10)',
+          example: 'POST http://localhost:3000/test/run-gemini',
         },
       ],
     };

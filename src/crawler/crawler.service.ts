@@ -200,8 +200,13 @@ export class CrawlerService {
       this.logger.log('페이지 로드 완료, 요금제 카드 대기 중...');
 
       // 데이터 피커 모달이 나타나면 닫기
-      if (await page.locator('div[data-sentry-component="PlansDataPickerModal"]').count()) {
+      const modalCount = await page
+        .locator('div[data-sentry-component="PlansDataPickerModal"]')
+        .count();
+      if (modalCount > 0) {
+        this.logger.log('데이터 피커 모달 발견, 닫기 시도...');
         await page.locator('body').first().click();
+        await page.waitForTimeout(500);
       }
 
       // 요금제 카드가 로드될 때까지 대기
@@ -213,153 +218,244 @@ export class CrawlerService {
       // 핵심 로직: 모든 혜택/상세 정보 버튼 펼치기
       // ============================================================
 
-      // 모든 버튼이 'open' 상태가 될 때까지 기다리기
-      await page.waitForFunction(
-        () => {
-          const buttons = page.locator('button[data-orientation="vertical"][data-state="closed"]');
+      // 모든 닫힌 버튼을 찾아서 클릭
+      let closedButtonCount = await page
+        .locator('button[data-orientation="vertical"][data-state="closed"]')
+        .count();
+      this.logger.log(`${closedButtonCount}개 닫힌 버튼 발견, 펼치기 시작...`);
 
-          // 모든 버튼을 찾아서 동시에 클릭 시도 (force: true로 강제 클릭)
-          const count = buttons.count();
-          this.logger.log(`${count}개 버튼 발견, 순차 클릭 시작...`);
+      let iteration = 0;
+      const maxIterations = 10;
 
-          for (let i = 0; i < count; i++) {
-            buttons.nth(i).click({ force: true });
-          }
-          const allButtons = document.querySelectorAll('button[data-orientation="vertical"]');
-          return Array.from(allButtons).every((btn) => btn.getAttribute('data-state') === 'open');
-        },
-        { timeout: 10000 },
-      );
-
-      this.logger.log('모든 상세 정보 버튼 펼치기 완료, 데이터 추출 중...');
-
-      // ============================================================
-      // 페이지에서 데이터 추출 (안정적인 Selector 사용)
-      // ============================================================
-      const plans = await page.evaluate(() => {
-        const planElements = document.querySelectorAll(
-          'div[class*="basic-plan-card_basicPlanCardBoxBase"]',
+      while (closedButtonCount > 0 && iteration < maxIterations) {
+        const closedButtons = page.locator(
+          'button[data-orientation="vertical"][data-state="closed"]',
         );
-        const results: any[] = [];
 
-        planElements.forEach((el) => {
+        for (let i = 0; i < closedButtonCount; i++) {
           try {
-            // ============================================================
-            // 1. mvno (사업자명) 추출: img 태그의 alt 속성
-            // ============================================================
-            const imgElement = el.querySelector('img[alt]');
-            const mvno = imgElement?.getAttribute('alt') || 'Unknown';
-
-            // ============================================================
-            // 2. planId 추출: a 태그의 href에서 마지막 숫자
-            // ============================================================
-            const linkElement = el.querySelector('a[href^="/plans/"]');
-            const href = linkElement?.getAttribute('href') || '';
-            const planId = href.split('/').pop() || '0';
-
-            // ============================================================
-            // 3. planName (요금제 이름) 추출
-            // - 구조: a > div > div > div > div > span (3번째 span)
-            // ============================================================
-            const allSpans = Array.from(el.querySelectorAll('a span'));
-            const planName = allSpans[2]?.textContent?.trim() || 'Unknown';
-
-            // ============================================================
-            // 4. dataSummary 추출: Bold 스타일의 큰 텍스트
-            // - "월 11GB + 매일 2GB + 3Mbps" 형태
-            // ============================================================
-            const boldSpans = Array.from(el.querySelectorAll('span'));
-            const dataSummary =
-              boldSpans
-                .find((span) => {
-                  const text = span.textContent || '';
-                  return text.includes('GB') || text.includes('Mbps');
-                })
-                ?.textContent?.trim() || '';
-
-            // ============================================================
-            // 5. promoPrice (현재가) 추출: "월 12,000원"
-            // - 색상이 강조된 span (indigo600)
-            // ============================================================
-            const promoPriceSpans = Array.from(el.querySelectorAll('span'));
-            const promoPriceText =
-              promoPriceSpans
-                .find((span) => {
-                  const text = span.textContent || '';
-                  return text.includes('월') && text.includes('원') && !text.includes('이후');
-                })
-                ?.textContent?.trim() || '0';
-
-            // ============================================================
-            // 6. originalPrice 및 promoDuration 추출: "7개월 이후 38,500원"
-            // ============================================================
-            const allTextSpans = Array.from(el.querySelectorAll('span'));
-            const originalPriceText =
-              allTextSpans
-                .find((span) => {
-                  const text = span.textContent || '';
-                  return text.includes('개월 이후');
-                })
-                ?.textContent?.trim() || '';
-
-            // ============================================================
-            // 7. 통신 스펙 추출: 통화, 문자, 통신망, 기술
-            // - gap_12 클래스를 가진 div 내의 span들을 순서대로 추출
-            // ============================================================
-            const specsContainer = Array.from(el.querySelectorAll('div')).find((div) => {
-              const className = div.className || '';
-              return className.includes('gap_12') && div.children.length >= 4;
-            });
-
-            const specsSpans = specsContainer
-              ? Array.from(specsContainer.querySelectorAll('span'))
-              : [];
-
-            // 구분선(verticalDivider)을 제외한 텍스트만 추출
-            const specsTexts = specsSpans
-              .map((span) => span.textContent?.trim())
-              .filter((text) => text && text.length > 0);
-
-            const talkText = specsTexts[0] || '';
-            const smsText = specsTexts[1] || '';
-            const networkText = specsTexts[2] || '';
-            const technologyText = specsTexts[3] || '';
-
-            // ============================================================
-            // 8. 혜택 정보 (펼쳐진 상태에서 추출)
-            // ============================================================
-            const benefitsButton = el.querySelector(
-              'button[data-orientation="vertical"][data-state="open"]',
-            );
-            const benefits = benefitsButton?.getAttribute('aria-label') || '';
-
-            // ============================================================
-            // 9. 결과 추가
-            // ============================================================
-            if (planName && mvno && planId !== '0') {
-              results.push({
-                planId,
-                planName,
-                mvno,
-                dataSummary,
-                promoPriceText,
-                originalPriceText,
-                talkText,
-                smsText,
-                networkText,
-                technologyText,
-                benefits,
-              });
-            }
-          } catch (error) {
-            console.error('요금제 카드 파싱 오류:', error);
+            await closedButtons.nth(i).click({ force: true, timeout: 1000 });
+          } catch (e) {
+            // 일부 버튼이 클릭 불가능한 경우 무시하고 계속 진행
           }
+        }
+
+        // 버튼 상태 업데이트 대기
+        await page.waitForTimeout(500);
+
+        // 남은 닫힌 버튼 수 확인
+        closedButtonCount = await page
+          .locator('button[data-orientation="vertical"][data-state="closed"]')
+          .count();
+        iteration++;
+
+        if (closedButtonCount > 0) {
+          this.logger.log(
+            `${closedButtonCount}개 버튼 남음, 재시도 중... (${iteration}/${maxIterations})`,
+          );
+        }
+      }
+
+      this.logger.log('모든 상세 정보 버튼 펼치기 완료, 페이지 순회 시작...');
+
+      // ============================================================
+      // 모든 페이지 순회하며 데이터 수집
+      // ============================================================
+      const allPlans: any[] = [];
+      let currentPage = 1;
+      let hasMorePages = true;
+
+      while (hasMorePages) {
+        this.logger.log(`페이지 ${currentPage} 크롤링 중...`);
+
+        // 현재 페이지 데이터 추출
+        const pagePlans = await page.evaluate(() => {
+          const planElements = document.querySelectorAll(
+            'div[class*="basic-plan-card_basicPlanCardBoxBase"]',
+          );
+          const results: any[] = [];
+
+          planElements.forEach((el) => {
+            try {
+              // ============================================================
+              // 1. mvno (사업자명) 추출: img 태그의 alt 속성
+              // ============================================================
+              const imgElement = el.querySelector('img[alt]');
+              const mvno = imgElement?.getAttribute('alt') || 'Unknown';
+
+              // ============================================================
+              // 2. planId 추출: a 태그의 href에서 마지막 숫자
+              // ============================================================
+              const linkElement = el.querySelector('a[href^="/plans/"]');
+              const href = linkElement?.getAttribute('href') || '';
+              const planId = href.split('/').pop() || '0';
+
+              // ============================================================
+              // 3. planName (요금제 이름) 추출
+              // - 구조: a > div > div > div > div > span (3번째 span)
+              // ============================================================
+              const allSpans = Array.from(el.querySelectorAll('a span'));
+              const planName = allSpans[2]?.textContent?.trim() || 'Unknown';
+
+              // ============================================================
+              // 4. dataSummary 추출: Bold 스타일의 큰 텍스트
+              // - "월 11GB + 매일 2GB + 3Mbps" 형태
+              // ============================================================
+              const boldSpans = Array.from(el.querySelectorAll('span'));
+              const dataSummary =
+                boldSpans
+                  .find((span) => {
+                    const text = span.textContent || '';
+                    return text.includes('GB') || text.includes('Mbps');
+                  })
+                  ?.textContent?.trim() || '';
+
+              // ============================================================
+              // 5. promoPrice (현재가) 추출: "월 12,000원"
+              // - 색상이 강조된 span (indigo600)
+              // ============================================================
+              const promoPriceSpans = Array.from(el.querySelectorAll('span'));
+              const promoPriceText =
+                promoPriceSpans
+                  .find((span) => {
+                    const text = span.textContent || '';
+                    return text.includes('월') && text.includes('원') && !text.includes('이후');
+                  })
+                  ?.textContent?.trim() || '0';
+
+              // ============================================================
+              // 6. originalPrice 및 promoDuration 추출: "7개월 이후 38,500원"
+              // ============================================================
+              const allTextSpans = Array.from(el.querySelectorAll('span'));
+              const originalPriceText =
+                allTextSpans
+                  .find((span) => {
+                    const text = span.textContent || '';
+                    return text.includes('개월 이후');
+                  })
+                  ?.textContent?.trim() || '';
+
+              // ============================================================
+              // 7. 통신 스펙 추출: 통화, 문자, 통신망, 기술
+              // - gap_12 클래스를 가진 div 내의 span들을 순서대로 추출
+              // ============================================================
+              const specsContainer = Array.from(el.querySelectorAll('div')).find((div) => {
+                const className = div.className || '';
+                return className.includes('gap_12') && div.children.length >= 4;
+              });
+
+              const specsSpans = specsContainer
+                ? Array.from(specsContainer.querySelectorAll('span'))
+                : [];
+
+              // 구분선(verticalDivider)을 제외한 텍스트만 추출
+              const specsTexts = specsSpans
+                .map((span) => span.textContent?.trim())
+                .filter((text) => text && text.length > 0);
+
+              const talkText = specsTexts[0] || '';
+              const smsText = specsTexts[1] || '';
+              const networkText = specsTexts[2] || '';
+              const technologyText = specsTexts[3] || '';
+
+              // ============================================================
+              // 8. 혜택 정보 (펼쳐진 상태에서 추출)
+              // ============================================================
+              const benefitsAccordion = el.querySelector(
+                'div[data-state="open"][data-orientation="vertical"]',
+              );
+              const benefitsParagraphs = benefitsAccordion
+                ? Array.from(benefitsAccordion.querySelectorAll('p'))
+                : [];
+              const benefits = benefitsParagraphs
+                .map((p) => p.textContent?.trim())
+                .filter((text) => text && text.length > 0)
+                .join(' | ');
+
+              // ============================================================
+              // 9. 결과 추가
+              // ============================================================
+              if (planName && mvno && planId !== '0') {
+                results.push({
+                  planId,
+                  planName,
+                  mvno,
+                  dataSummary,
+                  promoPriceText,
+                  originalPriceText,
+                  talkText,
+                  smsText,
+                  networkText,
+                  technologyText,
+                  benefits,
+                });
+              }
+            } catch (error) {
+              console.error('요금제 카드 파싱 오류:', error);
+            }
+          });
+
+          return results;
         });
 
-        return results;
-      });
+        this.logger.log(`페이지 ${currentPage}에서 ${pagePlans.length}개 요금제 추출`);
+        allPlans.push(...pagePlans);
 
-      this.logger.log(`${plans.length}개 요금제 추출 완료`);
+        // 다음 페이지 존재 여부 확인
+        currentPage++;
+        const nextPageLink = page.locator(`a[href="/plans?page=${currentPage}"]`);
+        const nextPageCount = await nextPageLink.count();
+
+        if (nextPageCount > 0) {
+          // 다음 페이지로 이동
+          await nextPageLink.first().click();
+          await page.waitForTimeout(1000);
+
+          // 요금제 카드 로드 대기
+          await page.waitForSelector('div[class*="basic-plan-card"]', { timeout: 30000 });
+
+          // 모달이 다시 나타나면 닫기
+          const modalCountAgain = await page
+            .locator('div[data-sentry-component="PlansDataPickerModal"]')
+            .count();
+          if (modalCountAgain > 0) {
+            await page.locator('body').first().click();
+            await page.waitForTimeout(500);
+          }
+
+          // 버튼 펼치기 반복
+          let closedButtonCountAgain = await page
+            .locator('button[data-orientation="vertical"][data-state="closed"]')
+            .count();
+
+          let iterationAgain = 0;
+          while (closedButtonCountAgain > 0 && iterationAgain < maxIterations) {
+            const closedButtonsAgain = page.locator(
+              'button[data-orientation="vertical"][data-state="closed"]',
+            );
+
+            for (let i = 0; i < closedButtonCountAgain; i++) {
+              try {
+                await closedButtonsAgain.nth(i).click({ force: true, timeout: 1000 });
+              } catch (e) {
+                // 무시
+              }
+            }
+
+            await page.waitForTimeout(500);
+            closedButtonCountAgain = await page
+              .locator('button[data-orientation="vertical"][data-state="closed"]')
+              .count();
+            iterationAgain++;
+          }
+        } else {
+          hasMorePages = false;
+          this.logger.log(`모든 페이지 크롤링 완료 (총 ${currentPage - 1}페이지)`);
+        }
+      }
+
+      const plans = allPlans;
+      this.logger.log(`전체 ${plans.length}개 요금제 추출 완료`);
 
       // ============================================================
       // 추출된 데이터를 CrawledPlanData 형식으로 변환
@@ -374,8 +470,9 @@ export class CrawlerService {
         // 3. planId: 요금제 고유 ID (이미 추출됨)
         const planId = plan.planId;
 
-        // 4. network: 통신망 (예: "KT망", "SKT망", "LG U+망")
-        const network = plan.networkText || 'Unknown';
+        // 4. network: 통신망 (예: "KT", "SKT", "LG U+")
+        // "망" 글자 제거
+        const network = (plan.networkText || 'Unknown').replace(/망$/, '');
 
         // 5. technology: 기술 (예: "LTE", "5G")
         const technology = plan.technologyText || 'LTE';

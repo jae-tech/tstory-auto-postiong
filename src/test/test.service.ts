@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CrawlerService } from '@/crawler/crawler.service';
+import { AnalyzerService } from '@/analyzer/analyzer.service';
+import { PrismaService } from '@/prisma/prisma.service';
 import { RawPlan } from '@prisma/client';
 
 /**
@@ -22,6 +24,20 @@ export interface CrawlerTestResult {
 }
 
 /**
+ * Gemini 분석 테스트 결과 인터페이스
+ */
+export interface AnalyzerTestResult {
+  success: boolean;
+  planId: string;
+  mvno: string;
+  title: string;
+  htmlBody: string;
+  tags: string[];
+  timestamp: string;
+  message: string;
+}
+
+/**
  * 테스트 서비스: 크롤러 기능을 수동으로 테스트하기 위한 서비스
  *
  * HTTP 요청을 통해 크롤러를 실행하고 결과를 확인할 수 있습니다.
@@ -31,7 +47,11 @@ export interface CrawlerTestResult {
 export class TestService {
   private readonly logger = new Logger(TestService.name);
 
-  constructor(private readonly crawlerService: CrawlerService) {}
+  constructor(
+    private readonly crawlerService: CrawlerService,
+    private readonly analyzerService: AnalyzerService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   /**
    * 크롤러 테스트 실행
@@ -92,5 +112,99 @@ export class TestService {
       crawler: this.crawlerService ? 'Available' : 'Not Available',
       timestamp: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Gemini 일괄 분석 테스트 실행
+   *
+   * DB의 모든 요금제를 조회하여 Gemini API로 일괄 분석합니다.
+   * Gemini가 가장 적합한 요금제를 선택하고 포스팅을 생성합니다.
+   *
+   * @returns Gemini 일괄 분석 결과
+   */
+  async runGeminiTest(): Promise<AnalyzerTestResult> {
+    try {
+      this.logger.log(`Gemini 일괄 분석 테스트 시작`);
+
+      // 모든 요금제 조회
+      const plans = await this.prisma.rawPlan.findMany({
+        orderBy: { pricePromo: 'asc' },
+      });
+
+      if (plans.length === 0) {
+        return {
+          success: false,
+          planId: '',
+          mvno: '',
+          title: '',
+          htmlBody: '',
+          tags: [],
+          timestamp: new Date().toISOString(),
+          message: 'DB에 요금제 데이터가 없습니다. 먼저 크롤러를 실행하세요.',
+        };
+      }
+
+      this.logger.log(`${plans.length}개 요금제 데이터로 비교형 블로그 생성 실행`);
+
+      // 분석기 워크플로우 실행
+      const result = await this.analyzerService.runAnalyzer();
+
+      if (!result.success) {
+        return {
+          success: false,
+          planId: '',
+          mvno: '',
+          title: '',
+          htmlBody: '',
+          tags: [],
+          timestamp: new Date().toISOString(),
+          message: `비교형 블로그 생성 실패`,
+        };
+      }
+
+      // PostQueue에서 최신 포스트 조회
+      const latestPost = await this.prisma.postQueue.findFirst({
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (!latestPost) {
+        return {
+          success: false,
+          planId: '',
+          mvno: '',
+          title: '',
+          htmlBody: '',
+          tags: [],
+          timestamp: new Date().toISOString(),
+          message: `포스트 큐에 데이터가 없습니다`,
+        };
+      }
+
+      this.logger.log(`비교형 블로그 생성 완료: ${latestPost.title}`);
+
+      return {
+        success: true,
+        planId: 'COMPARISON_POST',
+        mvno: 'Multiple',
+        title: latestPost.title,
+        htmlBody: latestPost.htmlBody,
+        tags: latestPost.tags,
+        timestamp: new Date().toISOString(),
+        message: `비교형 블로그 생성 성공: ${plans.length}개 요금제 기반 - ${latestPost.title}`,
+      };
+    } catch (error) {
+      this.logger.error('Gemini 일괄 분석 테스트 실패:', error);
+
+      return {
+        success: false,
+        planId: '',
+        mvno: '',
+        title: '',
+        htmlBody: '',
+        tags: [],
+        timestamp: new Date().toISOString(),
+        message: `Gemini 일괄 분석 실패: ${error.message}`,
+      };
+    }
   }
 }
