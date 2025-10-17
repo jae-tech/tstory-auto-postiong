@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { CrawlerService } from '@/crawler/crawler.service';
 import { AnalyzerService } from '@/analyzer/analyzer.service';
+import { PublisherService } from '@/publisher/publisher.service';
 import { PrismaService } from '@/prisma/prisma.service';
 import { RawPlan } from '@prisma/client';
 
@@ -50,6 +51,7 @@ export class TestService {
   constructor(
     private readonly crawlerService: CrawlerService,
     private readonly analyzerService: AnalyzerService,
+    private readonly publisherService: PublisherService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -92,26 +94,6 @@ export class TestService {
         message: `크롤링 실패: ${error.message}`,
       };
     }
-  }
-
-  /**
-   * 크롤러 상태 확인
-   *
-   * 크롤러 서비스가 정상적으로 주입되었는지 확인합니다.
-   * 간단한 health check용 메서드입니다.
-   *
-   * @returns 크롤러 서비스 상태
-   */
-  async checkCrawlerStatus(): Promise<{
-    status: string;
-    crawler: string;
-    timestamp: string;
-  }> {
-    return {
-      status: 'OK',
-      crawler: this.crawlerService ? 'Available' : 'Not Available',
-      timestamp: new Date().toISOString(),
-    };
   }
 
   /**
@@ -204,6 +186,112 @@ export class TestService {
         tags: [],
         timestamp: new Date().toISOString(),
         message: `Gemini 일괄 분석 실패: ${error.message}`,
+      };
+    }
+  }
+
+  /**
+   * 세션 초기화 테스트 실행
+   *
+   * 티스토리 로그인을 수행하고 세션을 저장합니다.
+   *
+   * @returns 세션 초기화 결과
+   */
+  async runSessionInitTest(): Promise<{
+    success: boolean;
+    message: string;
+    timestamp: string;
+  }> {
+    try {
+      this.logger.log('세션 초기화 테스트 시작');
+
+      // 세션 초기화 실행
+      await this.publisherService.initSession();
+
+      this.logger.log('세션 초기화 테스트 완료');
+
+      return {
+        success: true,
+        message: '세션 초기화 성공. 이제 로그인 없이 포스팅할 수 있습니다.',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.error('세션 초기화 테스트 실패:', error);
+
+      return {
+        success: false,
+        message: `세션 초기화 실패: ${error.message}`,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Publisher 테스트 실행
+   *
+   * PostQueue에서 PENDING 상태인 포스트를 가져와 티스토리에 발행합니다.
+   *
+   * @returns Publisher 테스트 결과
+   */
+  async runPublisherTest(): Promise<{
+    success: boolean;
+    postId: number | null;
+    title: string;
+    status: string;
+    timestamp: string;
+    message: string;
+  }> {
+    try {
+      this.logger.log('Publisher 테스트 시작');
+
+      // PostQueue에서 PENDING 포스트 조회
+      const pendingPost = await this.prisma.postQueue.findFirst({
+        where: { status: 'PENDING' },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (!pendingPost) {
+        return {
+          success: false,
+          postId: null,
+          title: '',
+          status: 'NO_POST',
+          timestamp: new Date().toISOString(),
+          message:
+            '발행할 포스트가 없습니다. 먼저 /test/run-gemini를 실행하여 포스트를 생성하세요.',
+        };
+      }
+
+      this.logger.log(`포스트 발행 시작: ${pendingPost.title} (ID: ${pendingPost.id})`);
+
+      // Publisher 서비스 실행
+      await this.publisherService.publishSinglePost(pendingPost);
+
+      // 발행 후 상태 확인
+      const updatedPost = await this.prisma.postQueue.findUnique({
+        where: { id: pendingPost.id },
+      });
+
+      this.logger.log(`포스트 발행 완료: ${updatedPost?.status}`);
+
+      return {
+        success: updatedPost?.status === 'PUBLISHED',
+        postId: pendingPost.id,
+        title: pendingPost.title,
+        status: updatedPost?.status || 'UNKNOWN',
+        timestamp: new Date().toISOString(),
+        message: `포스트 발행 ${updatedPost?.status === 'PUBLISHED' ? '성공' : '실패'}: ${pendingPost.title}`,
+      };
+    } catch (error) {
+      this.logger.error('Publisher 테스트 실패:', error);
+
+      return {
+        success: false,
+        postId: null,
+        title: '',
+        status: 'ERROR',
+        timestamp: new Date().toISOString(),
+        message: `포스트 발행 실패: ${error.message}`,
       };
     }
   }

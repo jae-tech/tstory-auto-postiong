@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '@/prisma/prisma.module';
+import { PlaywrightModule } from '@/playwright/playwright.module';
 import { AutomationModule } from '@/automation/automation.module';
 import { TestModule } from '@/test/test.module';
 import { AppController } from './app.controller';
@@ -12,6 +13,7 @@ import { AppService } from './app.service';
  * 구성:
  * - ConfigModule: 환경 변수 관리 (전역)
  * - PrismaModule: 데이터베이스 연결 (전역)
+ * - PlaywrightModule: Playwright 브라우저 자동화 (전역)
  * - AutomationModule: 중앙 집중식 자동화 파이프라인 (ScheduleModule 포함)
  * - TestModule: 크롤러 수동 테스트를 위한 임시 모듈 (개발 환경 전용)
  *
@@ -29,6 +31,9 @@ import { AppService } from './app.service';
 
     // Prisma 데이터베이스 모듈 (전역)
     PrismaModule,
+
+    // Playwright 브라우저 자동화 모듈 (전역)
+    PlaywrightModule,
 
     // 자동화 모듈 (Cron 스케줄러 및 전체 파이프라인)
     AutomationModule,

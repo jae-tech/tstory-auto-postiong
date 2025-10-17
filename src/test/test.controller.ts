@@ -43,26 +43,6 @@ export class TestController {
   }
 
   /**
-   * 크롤러 상태 확인 엔드포인트
-   *
-   * GET /test/status
-   *
-   * 크롤러 서비스가 정상적으로 동작하는지 확인합니다.
-   *
-   * @returns 크롤러 서비스 상태
-   */
-  @Get('status')
-  async getStatus(): Promise<{
-    status: string;
-    crawler: string;
-    timestamp: string;
-  }> {
-    this.logger.log('크롤러 상태 확인 요청 수신');
-
-    return await this.testService.checkCrawlerStatus();
-  }
-
-  /**
    * Gemini 일괄 분석 테스트 엔드포인트
    *
    * POST /test/run-gemini
@@ -83,6 +63,57 @@ export class TestController {
     return result;
   }
 
+  /**
+   * Publisher 세션 초기화 엔드포인트
+   *
+   * POST /test/init-session
+   *
+   * 티스토리 로그인을 수행하고 세션을 저장합니다.
+   * 세션 파일이 이미 존재하는 경우 건너뜁니다.
+   *
+   * @returns 세션 초기화 결과
+   */
+  @Post('init-session')
+  async initSession(): Promise<{
+    success: boolean;
+    message: string;
+    timestamp: string;
+  }> {
+    this.logger.log('세션 초기화 요청 수신');
+
+    const result = await this.testService.runSessionInitTest();
+
+    this.logger.log(`세션 초기화 응답: ${result.message}`);
+
+    return result;
+  }
+
+  /**
+   * Publisher 테스트 엔드포인트
+   *
+   * POST /test/run-publisher
+   *
+   * PostQueue에서 PENDING 상태인 포스트를 가져와 티스토리에 발행합니다.
+   *
+   * @returns Publisher 테스트 결과
+   */
+  @Post('run-publisher')
+  async runPublisher(): Promise<{
+    success: boolean;
+    postId: number | null;
+    title: string;
+    status: string;
+    timestamp: string;
+    message: string;
+  }> {
+    this.logger.log('Publisher 테스트 요청 수신');
+
+    const result = await this.testService.runPublisherTest();
+
+    this.logger.log(`Publisher 테스트 응답: ${result.message}`);
+
+    return result;
+  }
 
   /**
    * 테스트 모듈 정보 엔드포인트
@@ -133,8 +164,20 @@ export class TestController {
         {
           method: 'POST',
           path: '/test/run-gemini',
-          description: 'Gemini 비교형 블로그 생성 테스트 (5개 테마별 TOP 10)',
+          description: 'Gemini 비교형 블로그 생성 테스트 (5개 테마별 TOP 5)',
           example: 'POST http://localhost:3000/test/run-gemini',
+        },
+        {
+          method: 'POST',
+          path: '/test/init-session',
+          description: 'Publisher 세션 초기화 (티스토리 로그인 및 세션 저장)',
+          example: 'POST http://localhost:3000/test/init-session',
+        },
+        {
+          method: 'POST',
+          path: '/test/run-publisher',
+          description: 'Publisher 티스토리 포스팅 테스트 (PENDING 포스트 발행)',
+          example: 'POST http://localhost:3000/test/run-publisher',
         },
       ],
     };

@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { chromium, Browser, Page } from 'playwright';
+import { BrowserContext, Page } from 'playwright';
 import { PrismaService } from '@/prisma/prisma.service';
+import { PlaywrightService } from '@/playwright/playwright.service';
 import { RawPlan } from '@prisma/client';
 import * as crypto from 'crypto';
 
@@ -36,51 +37,12 @@ export interface CrawledPlanData {
 @Injectable()
 export class CrawlerService {
   private readonly logger = new Logger(CrawlerService.name);
-  private browser: Browser | null = null;
 
   constructor(
     private configService: ConfigService,
     private prisma: PrismaService,
+    private playwrightService: PlaywrightService,
   ) {}
-
-  /**
-   * OCI VM 및 Docker 환경에 최적화된 Playwright 실행 옵션
-   */
-  private getLaunchOptions() {
-    return {
-      headless: this.configService.get<string>('PLAYWRIGHT_HEADLESS') !== 'false',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
-        '--disable-web-security',
-      ],
-    };
-  }
-
-  /**
-   * 브라우저 인스턴스 가져오기
-   */
-  private async getBrowser(): Promise<Browser> {
-    if (!this.browser || !this.browser.isConnected()) {
-      this.logger.log('새 Playwright 브라우저 인스턴스 실행 중...');
-      this.browser = await chromium.launch(this.getLaunchOptions());
-    }
-    return this.browser;
-  }
-
-  /**
-   * 브라우저 인스턴스 종료
-   */
-  private async closeBrowser(): Promise<void> {
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
-      this.logger.log('브라우저 종료');
-    }
-  }
 
   /**
    * 요금제 데이터를 기반으로 해시 생성
@@ -165,12 +127,7 @@ export class CrawlerService {
       this.configService.get<string>('CRAWLER_TARGET_URL') || 'https://www.moyoplan.com';
 
     this.logger.log(`크롤링 시작: ${targetUrl}`);
-    const browser = await this.getBrowser();
-    const context = await browser.newContext({
-      viewport: { width: 1920, height: 1080 },
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
-    });
+    const context = await this.playwrightService.createContext();
 
     // 데이터 피커 모달 방지 쿠키 설정
     await context.addCookies([
@@ -531,7 +488,7 @@ export class CrawlerService {
     } finally {
       await page.close();
       await context.close();
-      await this.closeBrowser();
+      await this.playwrightService.closeBrowser();
     }
   }
 
