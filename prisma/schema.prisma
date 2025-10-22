@@ -18,8 +18,10 @@ datasource db {
 model RawPlan {
   // --- 주요 식별자 및 시간 관리 ---
   id          Int      @id @default(autoincrement())
-  planId      String   @unique @db.VarChar(255) // 요금제 고유 ID (Upsert 기준)
-  dataHash    String   @unique @db.VarChar(64)  // (필수) 요금제 스펙을 조합한 해시 값. 데이터 변경 감지 기준
+  planName    String   @db.VarChar(255) // 요금제 이름
+  dataHash    String   @unique @db.VarChar(64)  // (필수) 요금제 스펙을 조합한 해시 값. 데이터 변경 감지 및 Upsert 기준
+  sourceSite  String   @db.VarChar(100) // 크롤링 출처 사이트 (예: "moyoplan", "mvnohub")
+  detailUrl   String?  @db.VarChar(500) // 요금제 상세 페이지 URL
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -50,7 +52,7 @@ model RawPlan {
   rankingSnapshots RankingSnapshot[] @relation("RankedPlans")
 
   // 인덱스: 조회 성능 최적화
-  @@index([planId])
+  @@index([sourceSite])
   @@index([dataHash])
   @@index([mvno])
   @@index([network])
