@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { BrowserContext, Page } from 'playwright';
 import { PrismaService } from '@/prisma/prisma.service';
 import { PlaywrightService } from '@/playwright/playwright.service';
 import { RawPlan } from '@prisma/client';
@@ -10,8 +9,9 @@ import * as crypto from 'crypto';
  * 크롤링된 요금제 데이터 인터페이스
  */
 export interface CrawledPlanData {
-  planId: string;
   planName: string;
+  sourceSite: string; // 크롤링 출처 사이트 (예: "moyoplan", "mvnohub")
+  detailUrl: string | null; // 요금제 상세 페이지 URL
   mvno: string;
   network: string;
   technology: string;
@@ -46,11 +46,13 @@ export class CrawlerService {
 
   /**
    * 요금제 데이터를 기반으로 해시 생성
-   * 핵심 스펙 필드만 사용하여 변경 감지
+   * 핵심 스펙 필드만 사용하여 변경 감지 (planId 제거, sourceSite와 planName 조합 사용)
    */
   private generateDataHash(plan: CrawledPlanData): string {
     const hashSource = [
-      plan.planId,
+      plan.sourceSite,
+      plan.planName,
+      plan.mvno,
       plan.pricePromo,
       plan.priceOriginal,
       plan.dataBaseGB,
@@ -73,19 +75,57 @@ export class CrawlerService {
   }
 
   /**
-   * 데이터량 텍스트를 GB 숫자로 변환
+   * 복합 데이터 표현 파싱
+   * 예: "월 11GB + 매일 2GB + 3Mbps" -> { baseGB: 71, dailyGB: 2, speedMbps: 3 }
+   * 매일 2GB는 30일 기준 60GB로 환산하여 기본 데이터에 추가
+   */
+  private parseComplexDataExpression(text: string): {
+    totalGB: number;
+    dailyGB: number | null;
+    speedMbps: number | null;
+  } {
+    if (!text) return { totalGB: 0, dailyGB: null, speedMbps: null };
+    if (text.includes('무제한')) return { totalGB: 999, dailyGB: null, speedMbps: null };
+
+    let totalGB = 0;
+    let dailyGB: number | null = null;
+    let speedMbps: number | null = null;
+
+    // "월 XGB" 또는 단독 "XGB" 추출
+    const monthlyMatch = text.match(/(?:월\s*)?(\d+(?:\.\d+)?)\s*GB/i);
+    if (monthlyMatch) {
+      totalGB += parseFloat(monthlyMatch[1]);
+    }
+
+    // "매일 XGB" 추출 (30일 기준 환산)
+    const dailyMatch = text.match(/매일\s*(\d+(?:\.\d+)?)\s*GB/i);
+    if (dailyMatch) {
+      dailyGB = parseFloat(dailyMatch[1]);
+      totalGB += dailyGB * 30; // 30일 기준 총 데이터량에 합산
+    }
+
+    // "XMbps" 속도 제한 추출
+    const speedMatch = text.match(/(\d+(?:\.\d+)?)\s*Mbps/i);
+    if (speedMatch) {
+      speedMbps = parseFloat(speedMatch[1]);
+    }
+
+    // MB 단위 처리
+    const mbMatch = text.match(/(\d+(?:\.\d+)?)\s*MB/i);
+    if (mbMatch && totalGB === 0) {
+      totalGB = parseFloat(mbMatch[1]) / 1024;
+    }
+
+    return { totalGB, dailyGB, speedMbps };
+  }
+
+  /**
+   * 데이터량 텍스트를 GB 숫자로 변환 (하위 호환성 유지)
    * 예: "5GB" -> 5, "무제한" -> 999, "500MB" -> 0.5
    */
   private parseDataAmount(text: string): number {
-    if (!text || text.includes('무제한')) return 999;
-
-    const gbMatch = text.match(/(\d+(?:\.\d+)?)\s*GB/i);
-    if (gbMatch) return parseFloat(gbMatch[1]);
-
-    const mbMatch = text.match(/(\d+(?:\.\d+)?)\s*MB/i);
-    if (mbMatch) return parseFloat(mbMatch[1]) / 1024;
-
-    return 0;
+    const parsed = this.parseComplexDataExpression(text);
+    return parsed.totalGB;
   }
 
   /**
@@ -119,6 +159,30 @@ export class CrawlerService {
   }
 
   /**
+   * 사은품 정보 파싱 및 포맷팅
+   * 예: ["네이버페이 10,000P 제공", "데이터 결합 (추가데이터 20GB)"]
+   *     -> "네이버페이 10,000P | 추가 데이터 20GB"
+   */
+  private parseBenefits(benefitTexts: string[]): string | null {
+    if (!benefitTexts || benefitTexts.length === 0) return null;
+
+    const cleanedBenefits = benefitTexts
+      .map((text) => {
+        // 불필요한 접두사/접미사 제거
+        return text
+          .replace(/제공$/, '')
+          .replace(/^\s*-\s*/, '')
+          .replace(/데이터 결합\s*\(/g, '')
+          .replace(/추가데이터/g, '추가 데이터')
+          .replace(/\)$/g, '')
+          .trim();
+      })
+      .filter((text) => text.length > 0);
+
+    return cleanedBenefits.length > 0 ? cleanedBenefits.join(' | ') : null;
+  }
+
+  /**
    * moyoplan.com에서 알뜰폰 요금제 크롤링
    * 혜택 상세 정보 버튼을 모두 펼친 후 데이터 추출
    */
@@ -138,7 +202,7 @@ export class CrawlerService {
         path: '/',
         httpOnly: false,
         secure: false,
-        expires: Math.floor(Date.now() / 1000) + 60 * 60 * 24, // 만료: +1일(초 단위)
+        expires: Math.floor(Date.now() / 1000) + 60 * 60 * 24, // +1일
       },
     ]);
 
@@ -146,326 +210,278 @@ export class CrawlerService {
 
     try {
       // 대상 URL로 이동
-      await page.goto(targetUrl, {
-        waitUntil: 'domcontentloaded',
-        timeout: 60000,
-      });
-
-      // /plans 페이지로 이동
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.locator('a[href="/plans"]').first().click();
-
       this.logger.log('페이지 로드 완료, 요금제 카드 대기 중...');
 
-      // 데이터 피커 모달이 나타나면 닫기
-      const modalCount = await page
-        .locator('div[data-sentry-component="PlansDataPickerModal"]')
-        .count();
-      if (modalCount > 0) {
-        this.logger.log('데이터 피커 모달 발견, 닫기 시도...');
-        await page.locator('body').first().click();
-        await page.waitForTimeout(500);
-      }
+      // 데이터 피커 모달 닫기 함수
+      const closeDataPickerModal = async () => {
+        const modal = page.locator('div[data-sentry-component="PlansDataPickerModal"]');
+        if (await modal.isVisible()) {
+          this.logger.log('데이터 피커 모달 발견, 닫기 시도...');
+          await page.mouse.click(10, 10);
+          await page.waitForTimeout(300);
+        }
+      };
 
-      // 요금제 카드가 로드될 때까지 대기
+      await closeDataPickerModal();
+
+      // 요금제 카드 로드 대기
       await page.waitForSelector('div[class*="basic-plan-card"]', { timeout: 30000 });
-
-      this.logger.log('요금제 카드 로드 완료, 상세 정보 버튼 펼치기 시작...');
+      this.logger.log('요금제 카드 로드 완료.');
 
       // ============================================================
-      // 핵심 로직: 모든 혜택/상세 정보 버튼 펼치기
+      // 1️⃣ 모든 혜택/상세 정보 버튼 펼치기
       // ============================================================
-
-      // 모든 닫힌 버튼을 찾아서 클릭
-      let closedButtonCount = await page
-        .locator('button[data-orientation="vertical"][data-state="closed"]')
-        .count();
-      this.logger.log(`${closedButtonCount}개 닫힌 버튼 발견, 펼치기 시작...`);
-
-      let iteration = 0;
-      const maxIterations = 10;
-
-      while (closedButtonCount > 0 && iteration < maxIterations) {
-        const closedButtons = page.locator(
+      const expandAllAccordions = async () => {
+        let closedButtons = page.locator(
           'button[data-orientation="vertical"][data-state="closed"]',
         );
+        let count = await closedButtons.count();
+        let tries = 0;
 
-        for (let i = 0; i < closedButtonCount; i++) {
-          try {
-            await closedButtons.nth(i).click({ force: true, timeout: 1000 });
-          } catch (e) {
-            // 일부 버튼이 클릭 불가능한 경우 무시하고 계속 진행
+        while (count > 0 && tries < 8) {
+          this.logger.log(`닫힌 버튼 ${count}개 발견, 펼치는 중...`);
+          for (let i = 0; i < count; i++) {
+            try {
+              await closedButtons.nth(i).click({ force: true, timeout: 1000 });
+            } catch {
+              // 버튼 클릭 실패 무시
+            }
           }
+          await page.waitForTimeout(400);
+          closedButtons = page.locator('button[data-orientation="vertical"][data-state="closed"]');
+          count = await closedButtons.count();
+          tries++;
         }
+      };
 
-        // 버튼 상태 업데이트 대기
-        await page.waitForTimeout(500);
+      await expandAllAccordions();
+      this.logger.log('모든 상세 정보 버튼 펼치기 완료.');
 
-        // 남은 닫힌 버튼 수 확인
-        closedButtonCount = await page
-          .locator('button[data-orientation="vertical"][data-state="closed"]')
-          .count();
-        iteration++;
-
-        if (closedButtonCount > 0) {
-          this.logger.log(
-            `${closedButtonCount}개 버튼 남음, 재시도 중... (${iteration}/${maxIterations})`,
-          );
-        }
-      }
-
-      this.logger.log('모든 상세 정보 버튼 펼치기 완료, 페이지 순회 시작...');
+      // DOM 업데이트 대기
+      await page.waitForTimeout(1000);
+      this.logger.log('DOM 업데이트 대기 완료, 크롤링 시작...');
 
       // ============================================================
-      // 모든 페이지 순회하며 데이터 수집
+      // 2️⃣ 모든 페이지 순회
       // ============================================================
-      const allPlans: any[] = [];
+      const allPlans: {
+        planName: string;
+        detailUrl: string | null;
+        mvno: string;
+        dataSummary: string;
+        promoPriceText: string;
+        originalPriceText: string;
+        talkText: string;
+        smsText: string;
+        networkText: string;
+        technologyText: string;
+        benefits: string[];
+      }[] = [];
       let currentPage = 1;
       let hasMorePages = true;
 
       while (hasMorePages) {
-        this.logger.log(`페이지 ${currentPage} 크롤링 중...`);
+        this.logger.log(`========== 페이지 ${currentPage} 크롤링 시작 ==========`);
 
-        // 현재 페이지 데이터 추출
-        const pagePlans = await page.evaluate(() => {
-          const planElements = document.querySelectorAll(
-            'div[class*="basic-plan-card_basicPlanCardBoxBase"]',
-          );
-          const results: any[] = [];
+        // 요금제 카드만 선택 (숫자 ID가 포함된 /plans/ 링크만)
+        const cards = page.locator('a[href^="/plans/"]:has(img[alt])');
+        const count = await cards.count();
+        this.logger.log(`페이지 ${currentPage}에서 ${count}개 카드 발견`);
 
-          planElements.forEach((el) => {
-            try {
-              // ============================================================
-              // 1. mvno (사업자명) 추출: img 태그의 alt 속성
-              // ============================================================
-              const imgElement = el.querySelector('img[alt]');
-              const mvno = imgElement?.getAttribute('alt') || 'Unknown';
+        for (let i = 0; i < count; i++) {
+          try {
+            this.logger.debug(`카드 ${i + 1}/${count} 처리 중...`);
+            const card = cards.nth(i);
 
-              // ============================================================
-              // 2. planId 추출: a 태그의 href에서 마지막 숫자
-              // ============================================================
-              const linkElement = el.querySelector('a[href^="/plans/"]');
-              const href = linkElement?.getAttribute('href') || '';
-              const planId = href.split('/').pop() || '0';
+            // 요금제 상세 페이지 URL 추출
+            this.logger.debug(`  - URL 추출 중...`);
+            const planUrl = (await card.getAttribute('href')) || '';
+            const detailUrl = planUrl ? `https://www.moyoplan.com${planUrl}` : null;
+            this.logger.debug(`    URL: ${detailUrl}`);
 
-              // ============================================================
-              // 3. planName (요금제 이름) 추출
-              // - 구조: a > div > div > div > div > span (3번째 span)
-              // ============================================================
-              const allSpans = Array.from(el.querySelectorAll('a span'));
-              const planName = allSpans[2]?.textContent?.trim() || 'Unknown';
+            // MVNO 이름 (img의 alt 속성)
+            this.logger.debug(`  - MVNO 추출 중...`);
+            const mvno = await card
+              .locator('img[alt]')
+              .first()
+              .getAttribute('alt', { timeout: 3000 })
+              .catch(() => null);
+            this.logger.debug(`    MVNO: ${mvno}`);
 
-              // ============================================================
-              // 4. dataSummary 추출: Bold 스타일의 큰 텍스트
-              // - "월 11GB + 매일 2GB + 3Mbps" 형태
-              // ============================================================
-              const boldSpans = Array.from(el.querySelectorAll('span'));
-              const dataSummary =
-                boldSpans
-                  .find((span) => {
-                    const text = span.textContent || '';
-                    return text.includes('GB') || text.includes('Mbps');
-                  })
-                  ?.textContent?.trim() || '';
+            // 요금제 이름과 데이터 요약 추출
+            this.logger.debug(`  - 요금제 이름 & 데이터 요약 추출 중...`);
+            const allSpans = await card.locator('span').allTextContents();
+            this.logger.debug(`    전체 span 개수: ${allSpans.length}`);
 
-              // ============================================================
-              // 5. promoPrice (현재가) 추출: "월 12,000원"
-              // - 색상이 강조된 span (indigo600)
-              // ============================================================
-              const promoPriceSpans = Array.from(el.querySelectorAll('span'));
-              const promoPriceText =
-                promoPriceSpans
-                  .find((span) => {
-                    const text = span.textContent || '';
-                    return text.includes('월') && text.includes('원') && !text.includes('이후');
-                  })
-                  ?.textContent?.trim() || '0';
-
-              // ============================================================
-              // 6. originalPrice 및 promoDuration 추출: "7개월 이후 38,500원"
-              // ============================================================
-              const allTextSpans = Array.from(el.querySelectorAll('span'));
-              const originalPriceText =
-                allTextSpans
-                  .find((span) => {
-                    const text = span.textContent || '';
-                    return text.includes('개월 이후');
-                  })
-                  ?.textContent?.trim() || '';
-
-              // ============================================================
-              // 7. 통신 스펙 추출: 통화, 문자, 통신망, 기술
-              // - gap_12 클래스를 가진 div 내의 span들을 순서대로 추출
-              // ============================================================
-              const specsContainer = Array.from(el.querySelectorAll('div')).find((div) => {
-                const className = div.className || '';
-                return className.includes('gap_12') && div.children.length >= 4;
-              });
-
-              const specsSpans = specsContainer
-                ? Array.from(specsContainer.querySelectorAll('span'))
-                : [];
-
-              // 구분선(verticalDivider)을 제외한 텍스트만 추출
-              const specsTexts = specsSpans
-                .map((span) => span.textContent?.trim())
-                .filter((text) => text && text.length > 0);
-
-              const talkText = specsTexts[0] || '';
-              const smsText = specsTexts[1] || '';
-              const networkText = specsTexts[2] || '';
-              const technologyText = specsTexts[3] || '';
-
-              // ============================================================
-              // 8. 혜택 정보 (펼쳐진 상태에서 추출)
-              // ============================================================
-              const benefitsAccordion = el.querySelector(
-                'div[data-state="open"][data-orientation="vertical"]',
-              );
-              const benefitsParagraphs = benefitsAccordion
-                ? Array.from(benefitsAccordion.querySelectorAll('p'))
-                : [];
-              const benefits = benefitsParagraphs
-                .map((p) => p.textContent?.trim())
-                .filter((text) => text && text.length > 0)
-                .join(' | ');
-
-              // ============================================================
-              // 9. 결과 추가
-              // ============================================================
-              if (planName && mvno && planId !== '0') {
-                results.push({
-                  planId,
-                  planName,
-                  mvno,
-                  dataSummary,
-                  promoPriceText,
-                  originalPriceText,
-                  talkText,
-                  smsText,
-                  networkText,
-                  technologyText,
-                  benefits,
-                });
-              }
-            } catch (error) {
-              console.error('요금제 카드 파싱 오류:', error);
-            }
-          });
-
-          return results;
-        });
-
-        this.logger.log(`페이지 ${currentPage}에서 ${pagePlans.length}개 요금제 추출`);
-        allPlans.push(...pagePlans);
-
-        // 다음 페이지 존재 여부 확인
-        currentPage++;
-        const nextPageLink = page.locator(`a[href="/plans?page=${currentPage}"]`);
-        const nextPageCount = await nextPageLink.count();
-
-        if (nextPageCount > 0) {
-          // 다음 페이지로 이동
-          await nextPageLink.first().click();
-          await page.waitForTimeout(1000);
-
-          // 요금제 카드 로드 대기
-          await page.waitForSelector('div[class*="basic-plan-card"]', { timeout: 30000 });
-
-          // 모달이 다시 나타나면 닫기
-          const modalCountAgain = await page
-            .locator('div[data-sentry-component="PlansDataPickerModal"]')
-            .count();
-          if (modalCountAgain > 0) {
-            await page.locator('body').first().click();
-            await page.waitForTimeout(500);
-          }
-
-          // 버튼 펼치기 반복
-          let closedButtonCountAgain = await page
-            .locator('button[data-orientation="vertical"][data-state="closed"]')
-            .count();
-
-          let iterationAgain = 0;
-          while (closedButtonCountAgain > 0 && iterationAgain < maxIterations) {
-            const closedButtonsAgain = page.locator(
-              'button[data-orientation="vertical"][data-state="closed"]',
+            // GB/Mbps 포함 텍스트들 (데이터 요약 후보)
+            const dataTexts = allSpans.filter(
+              (text) =>
+                (text.includes('GB') || text.includes('Mbps')) &&
+                text.length > 2 && // 최소 길이 완화 (5 → 2)
+                !text.includes('원'), // 가격 제외
             );
 
-            for (let i = 0; i < closedButtonCountAgain; i++) {
-              try {
-                await closedButtonsAgain.nth(i).click({ force: true, timeout: 1000 });
-              } catch (e) {
-                // 무시
-              }
-            }
+            // 데이터 요약: "월" 포함하거나 "+" 포함 (예: "월 100GB + 5Mbps")
+            const dataSummary =
+              dataTexts.find(
+                (text) => text.includes('월') || (text.includes('+') && text.includes('Mbps')),
+              ) ||
+              dataTexts[0] ||
+              '';
 
-            await page.waitForTimeout(500);
-            closedButtonCountAgain = await page
-              .locator('button[data-orientation="vertical"][data-state="closed"]')
-              .count();
-            iterationAgain++;
+            // 요금제 이름: 데이터 요약이 아닌 것 중에서
+            // 1. 대괄호 포함 (예: [모요핫딜])
+            // 2. 괄호 포함 (예: 5G 스마트플러스(200분 + 5GB))
+            // 3. 8자 이상이고 제외 키워드 없는 것
+            const planName =
+              allSpans.find((text) => {
+                const trimmed = text.trim();
+                if (trimmed === dataSummary) return false; // 데이터 요약 제외
+                if (trimmed.length < 5) return false;
+
+                // 제외 패턴
+                if (trimmed.includes('원')) return false; // 가격
+                if (trimmed.includes('선택')) return false; // "XXX명이 선택"
+                if (trimmed.match(/^\d+\.\d+$/)) return false; // 별점 (예: "4.3")
+                if (trimmed.match(/^(통화|문자)\s*(무제한|\d+분|\d+건)$/)) return false; // "통화 200분", "문자 100건"
+                if (trimmed.match(/^(KT|SKT|LG U\+)망$/)) return false; // "SKT망"
+                if (trimmed.match(/^(LTE|5G)$/)) return false; // "LTE", "5G"
+                if (trimmed.match(/^월\s*\d+GB$/i)) return false; // "월 5GB" (데이터 요약)
+
+                // 포함 패턴 (우선순위 순)
+                if (trimmed.includes('[')) return true; // 대괄호 우선 (예: [모요핫딜])
+                if (trimmed.includes('(') && trimmed.includes(')')) return true; // 괄호 포함 (예: 스마트플러스(200분 + 5GB))
+                if (trimmed.length >= 8) return true; // 8자 이상
+
+                return false;
+              }) || null;
+
+            this.logger.debug(`    planName: ${planName}`);
+            this.logger.debug(`    dataSummary: ${dataSummary}`);
+
+            // 프로모션 가격 ("월" 포함하고 "이후" 미포함)
+            this.logger.debug(`  - 프로모션 가격 추출 중...`);
+            const promoPrice =
+              allSpans.find(
+                (text) => text.includes('월') && text.includes('원') && !text.includes('이후'),
+              ) || '';
+
+            // 원래 가격 ("개월 이후" 포함)
+            this.logger.debug(`  - 원래 가격 추출 중...`);
+            const originalPrice =
+              allSpans.find((text) => text.includes('개월') && text.includes('이후')) || '';
+
+            // 통화/문자/망/기술 스펙
+            this.logger.debug(`  - 스펙 정보 추출 중...`);
+            const specs = allSpans.filter(
+              (text) =>
+                text.includes('통화') ||
+                text.includes('문자') ||
+                text.includes('망') ||
+                /LTE|5G/.test(text),
+            );
+
+            const talkText = specs.find((t) => t.includes('통화')) || '';
+            const smsText = specs.find((t) => t.includes('문자')) || '';
+            const networkText = specs.find((t) => /(KT|SKT|LG U\+|LGU)/.test(t)) || ''; // "LG U+" 추가
+            const technologyText = specs.find((t) => /(LTE|5G)/.test(t)) || '';
+
+            // 사은품 정보 추출 (Accordion 내부 - data-state="open"인 div 안의 p 태그)
+            this.logger.debug(`  - 사은품 정보 추출 중...`);
+            const benefitItems = await card
+              .locator('div[data-state="open"] p')
+              .allTextContents()
+              .catch(() => []);
+
+            if (mvno && planName) {
+              allPlans.push({
+                planName: planName.trim(),
+                detailUrl,
+                mvno,
+                dataSummary: dataSummary?.trim(),
+                promoPriceText: promoPrice?.trim(),
+                originalPriceText: originalPrice?.trim(),
+                talkText,
+                smsText,
+                networkText,
+                technologyText,
+                benefits: benefitItems,
+              });
+              this.logger.debug(`✓ 카드 ${i + 1} 완료: ${planName?.trim()}`);
+            } else {
+              this.logger.warn(`✗ 카드 ${i + 1} 스킵: mvno=${mvno}, planName=${planName}`);
+            }
+          } catch (error) {
+            this.logger.error(`카드 ${i + 1} 처리 중 에러:`, error);
+            // 개별 카드 에러는 무시하고 계속 진행
           }
+        }
+
+        this.logger.log(`페이지 ${currentPage} 완료: 총 ${allPlans.length}개 누적`);
+
+        // 다음 페이지로 이동
+        const nextPageLink = page.locator(`a[href="/plans?page=${currentPage + 1}"]`);
+        const hasNextPage = await nextPageLink.isVisible();
+
+        if (hasNextPage) {
+          this.logger.log(`다음 페이지(${currentPage + 1})로 이동 중...`);
+          await nextPageLink.first().click();
+          await page.waitForLoadState('networkidle');
+          this.logger.log(`페이지 ${currentPage + 1} 로드 완료`);
+
+          await closeDataPickerModal();
+          await expandAllAccordions();
+          await page.waitForTimeout(1000); // DOM 업데이트 대기
+
+          currentPage++;
         } else {
           hasMorePages = false;
-          this.logger.log(`모든 페이지 크롤링 완료 (총 ${currentPage - 1}페이지)`);
+          this.logger.log(
+            `========== 모든 페이지 크롤링 완료 (총 ${currentPage}페이지) ==========`,
+          );
         }
       }
 
-      const plans = allPlans;
-      this.logger.log(`전체 ${plans.length}개 요금제 추출 완료`);
-
       // ============================================================
-      // 추출된 데이터를 CrawledPlanData 형식으로 변환
+      // 3️⃣ 데이터 후처리 및 CrawledPlanData 변환
       // ============================================================
-      const crawledPlans: CrawledPlanData[] = plans.map((plan) => {
-        // 1. mvno: 사업자명 (이미 추출됨)
+      this.logger.log(`데이터 변환 시작: ${allPlans.length}개 요금제`);
+      const crawledPlans: CrawledPlanData[] = allPlans.map((plan) => {
         const mvno = plan.mvno;
-
-        // 2. planName: 요금제 이름 (이미 추출됨)
         const planName = plan.planName;
+        const sourceSite = 'moyoplan'; // 현재 크롤링 출처
+        const detailUrl = plan.detailUrl;
 
-        // 3. planId: 요금제 고유 ID (이미 추출됨)
-        const planId = plan.planId;
+        // 망 정보 정규화 ("KT망" → "KT", "LG U+망" → "LG U+")
+        let network = (plan.networkText || 'Unknown').replace(/망$/, '').trim();
+        // "LGU" → "LG U+" 정규화
+        if (network === 'LGU') {
+          network = 'LG U+';
+        }
 
-        // 4. network: 통신망 (예: "KT", "SKT", "LG U+")
-        // "망" 글자 제거
-        const network = (plan.networkText || 'Unknown').replace(/망$/, '');
-
-        // 5. technology: 기술 (예: "LTE", "5G")
         const technology = plan.technologyText || 'LTE';
-
-        // 6. pricePromo: 현재 할인가 (예: "월 12,000원" -> 12000)
         const pricePromo = this.extractNumber(plan.promoPriceText);
-
-        // 7. priceOriginal: 할인 전 원가 (예: "7개월 이후 38,500원" -> 38500)
         const priceOriginal = plan.originalPriceText
           ? this.extractNumber(plan.originalPriceText)
           : null;
-
-        // 8. promotionDurationMonths: 할인 기간 (예: "7개월 이후" -> 7)
         const promotionDurationMonths = this.parsePromotionDuration(plan.originalPriceText || '');
-
-        // 9. promotionEndDate: 종료일 (명시적으로 제공되지 않으면 null)
         const promotionEndDate = null;
 
-        // 10. dataBaseGB: 기본 데이터량 (예: "월 11GB" -> 11)
-        const dataBaseGB = this.parseDataAmount(plan.dataSummary);
+        // 복합 데이터 표현 파싱 (월 11GB + 매일 2GB + 3Mbps)
+        const dataInfo = this.parseComplexDataExpression(plan.dataSummary);
+        const dataBaseGB = dataInfo.totalGB;
+        const dataPostSpeedMbps = dataInfo.speedMbps;
 
-        // 11. dataPostSpeedMbps: 소진 후 속도 (예: "3Mbps" -> 3)
-        const dataPostSpeedMbps = this.parseSpeed(plan.dataSummary);
-
-        // 12. talkMinutes: 통화 제공량 (예: "통화 무제한" -> 9999)
         const talkMinutes = this.parseUnlimitedOrNumber(plan.talkText);
-
-        // 13. smsCount: 문자 제공량 (예: "문자 무제한" -> 9999)
         const smsCount = this.parseUnlimitedOrNumber(plan.smsText);
-
-        // 14. benefitSummary: 혜택 요약
-        const benefitSummary = plan.benefits || null;
+        const benefitSummary = this.parseBenefits(plan.benefits);
 
         return {
-          planId,
           planName,
+          sourceSite,
+          detailUrl,
           mvno,
           network,
           technology,
@@ -481,6 +497,7 @@ export class CrawlerService {
         };
       });
 
+      this.logger.log(`총 ${crawledPlans.length}개 요금제 크롤링 완료`);
       return crawledPlans;
     } catch (error) {
       this.logger.error('크롤링 실패:', error);
@@ -493,17 +510,243 @@ export class CrawlerService {
   }
 
   /**
+   * U+ 알뜰폰 공식몰 크롤링
+   * - 출처: https://www.uplusmvno.com/plan/plan-list
+   * - SPA 기반 사이트, Playwright로 DOM 접근
+   * - 페이지네이션 지원 (다음 버튼 클릭)
+   */
+  async crawlPlansUplus(): Promise<CrawledPlanData[]> {
+    const targetUrl = 'https://www.uplusmvno.com/plan/plan-list';
+    this.logger.log(`U+ 알뜰폰 크롤링 시작: ${targetUrl}`);
+
+    const context = await this.playwrightService.createContext();
+    const page = await context.newPage();
+
+    try {
+      // 페이지 이동
+      await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+      // .plan_item 렌더링 대기
+      await page.waitForSelector('.plan_item', { timeout: 30000 });
+      this.logger.log('.plan_item 로드 완료');
+
+      const crawledPlans: CrawledPlanData[] = [];
+      let currentPage = 1;
+      let hasNextPage = true;
+
+      // ============================================================
+      // 모든 페이지 순회
+      // ============================================================
+      while (hasNextPage) {
+        this.logger.log(`========== 페이지 ${currentPage} 크롤링 시작 ==========`);
+
+        // 현재 페이지의 모든 요금제 카드 수집
+        const planItems = page.locator('.plan_item');
+        const count = await planItems.count();
+        this.logger.log(`페이지 ${currentPage}에서 ${count}개 요금제 발견`);
+
+        for (let i = 0; i < count; i++) {
+          try {
+            const item = planItems.nth(i);
+
+            // 1. 요금제명
+            const planName =
+              (await item.locator('.plan_tit').first().textContent({ timeout: 3000 })) || 'Unknown';
+
+            // 2. 데이터 요약 (예: "월 100GB + 5Mbps")
+            const dataSummary =
+              (await item
+                .locator('.plan_tit_sub')
+                .first()
+                .textContent({ timeout: 3000 })
+                .catch(() => null)) || '';
+
+            // 3. 제휴사 (data-gtm-click-text에서 추출)
+            // 예: "에스원안심모바일|[유심/eSIM무료+Npay 3만P] 100GB+/통화마음껏_24개월|월 100GB + 5Mbps"
+            const gtmClickText =
+              (await item
+                .locator('a.link_list')
+                .first()
+                .getAttribute('data-gtm-click-text', { timeout: 3000 })
+                .catch(() => null)) || null;
+
+            let mvno = 'Unknown';
+            if (gtmClickText) {
+              // 파이프(|)로 분리하여 첫 번째 부분이 MVNO
+              const parts = gtmClickText.split('|');
+              if (parts.length > 0) {
+                mvno = parts[0].trim() || 'Unknown';
+              }
+            }
+
+            // 4. 네트워크 (LTE/5G)
+            const cellularText =
+              (await item
+                .locator('.cellular')
+                .first()
+                .textContent({ timeout: 3000 })
+                .catch(() => null)) || '';
+            const technology = cellularText.includes('5G') ? '5G' : 'LTE';
+
+            // 5. 통화량
+            const phoneText =
+              (await item
+                .locator('.phone')
+                .first()
+                .textContent({ timeout: 3000 })
+                .catch(() => null)) || '';
+            const talkMinutes =
+              phoneText.includes('기본제공') || phoneText.includes('무제한')
+                ? 9999
+                : this.extractNumber(phoneText);
+
+            // 6. 월 요금 (텍스트 노드만 추출하여 tooltip 제외)
+            const monthPriceText =
+              (await item
+                .locator('.card_price .month')
+                .first()
+                .evaluate((el: Element) => {
+                  // childNodes에서 텍스트 노드만 추출 (tooltip 버튼 제외)
+                  const textNodes = Array.from(el.childNodes)
+                    .filter((node) => node.nodeType === Node.TEXT_NODE)
+                    .map((node) => node.textContent?.trim() || '')
+                    .filter((text) => text.length > 0);
+                  return textNodes.join(' ');
+                })
+                .catch(() => '')) || '';
+            const pricePromo = this.extractNumber(monthPriceText);
+
+            // 7. 정상 요금 및 계약 기간 (예: "24개월 이후 44,000원")
+            const periodText =
+              (await item
+                .locator('.card_price .period')
+                .first()
+                .textContent({ timeout: 3000 })
+                .catch(() => null)) || '';
+            const priceOriginal = periodText ? this.extractNumber(periodText) : null;
+
+            // 계약 기간 파싱
+            const contractMatch = periodText.match(/(\d+)\s*개월/);
+            const contractPeriod = contractMatch ? parseInt(contractMatch[1], 10) : null;
+
+            // 8. 상세 URL
+            const detailUrl =
+              (await item
+                .locator('a.link_list')
+                .first()
+                .getAttribute('data-gtm-click-url', { timeout: 3000 })
+                .catch(() => null)) || null;
+
+            // 9. 혜택 정보 (사은품 버튼 클릭하여 추출)
+            let benefitSummary: string | null = null;
+            try {
+              const benefitButton = item.locator('button.btn_acc');
+              const benefitButtonExists = await benefitButton.count();
+
+              if (benefitButtonExists > 0) {
+                // aria-expanded가 false면 버튼 클릭하여 펼치기
+                const isExpanded = (await benefitButton.getAttribute('aria-expanded')) === 'true';
+
+                if (!isExpanded) {
+                  await benefitButton.click({ timeout: 2000 });
+                  await page.waitForTimeout(500); // 애니메이션 대기
+                }
+
+                // 혜택 이미지의 alt 텍스트 수집
+                const giftImages = item.locator('.bag_list img[alt]');
+                const benefitAlts = await giftImages.evaluateAll((imgs: Element[]) =>
+                  imgs
+                    .map((img: Element) => (img as HTMLImageElement).alt)
+                    .filter((alt: string) => alt && alt.trim() && !alt.includes('이미지')),
+                );
+
+                if (benefitAlts.length > 0) {
+                  benefitSummary = benefitAlts.join(' | ');
+                }
+              }
+            } catch (benefitError) {
+              this.logger.debug(`혜택 정보 추출 실패 (카드 ${i + 1}):`, benefitError);
+              // 혜택 정보 실패는 무시하고 계속 진행
+            }
+
+            // 데이터량 파싱 (예: "월 100GB + 5Mbps" -> 100)
+            const dataBaseGB = this.parseDataAmount(dataSummary);
+
+            // 속도 제한 파싱 (예: "월 100GB + 5Mbps" -> 5)
+            const dataPostSpeedMbps = this.parseSpeed(dataSummary);
+
+            // CrawledPlanData 생성
+            const crawledPlan: CrawledPlanData = {
+              planName: planName.trim(),
+              sourceSite: 'uplus',
+              detailUrl,
+              mvno,
+              network: 'LG U+', // U+ 알뜰폰은 모두 LG U+ 망 사용
+              technology,
+              pricePromo,
+              priceOriginal,
+              promotionDurationMonths: contractPeriod,
+              promotionEndDate: null,
+              dataBaseGB,
+              dataPostSpeedMbps,
+              talkMinutes,
+              smsCount: 9999, // U+ 알뜰폰은 일반적으로 문자 무제한 제공
+              benefitSummary,
+            };
+
+            crawledPlans.push(crawledPlan);
+            this.logger.debug(`✓ ${i + 1}/${count} 완료: ${planName.trim()}`);
+          } catch (error) {
+            this.logger.error(`카드 ${i + 1} 처리 중 에러:`, error);
+            // 개별 카드 에러는 무시하고 계속 진행
+          }
+        }
+
+        this.logger.log(`페이지 ${currentPage} 완료: 총 ${crawledPlans.length}개 누적`);
+
+        // 다음 페이지로 이동
+        const nextButton = page.locator('button:has-text("다음")').first();
+        const nextButtonExists = await nextButton.count();
+
+        if (nextButtonExists > 0 && (await nextButton.isVisible())) {
+          this.logger.log(`다음 페이지(${currentPage + 1})로 이동 중...`);
+          await nextButton.click();
+          await page.waitForTimeout(2000); // 페이지 로딩 대기
+          await page.waitForSelector('.plan_item', { timeout: 10000 });
+          currentPage++;
+        } else {
+          hasNextPage = false;
+          this.logger.log(
+            `========== 모든 페이지 크롤링 완료 (총 ${currentPage}페이지) ==========`,
+          );
+        }
+      }
+
+      this.logger.log(`U+ 알뜰폰 크롤링 완료: ${crawledPlans.length}개 요금제`);
+      return crawledPlans;
+    } catch (error) {
+      this.logger.error('U+ 알뜰폰 크롤링 실패:', error);
+      throw error;
+    } finally {
+      await page.close();
+      await context.close();
+      await this.playwrightService.closeBrowser();
+    }
+  }
+
+  /**
    * 더미 크롤링 로직 (테스트용)
    */
-  async crawlPlansDemo(): Promise<CrawledPlanData[]> {
+  crawlPlansDemo(): CrawledPlanData[] {
     this.logger.log('더미 크롤링 시작 (테스트 데이터 생성)');
 
     const dummyPlans: CrawledPlanData[] = [
       {
-        planId: '29214',
         planName: '[모요핫딜]음성기본 11GB+일 2GB+',
+        sourceSite: 'moyoplan',
+        detailUrl: 'https://www.moyoplan.com/plans/29214',
         mvno: '찬스모바일',
-        network: 'LG U+망',
+        network: 'LG U+',
         technology: 'LTE',
         pricePromo: 12000,
         priceOriginal: 38500,
@@ -516,10 +759,11 @@ export class CrawlerService {
         benefitSummary: '7개월 할인, 기본 통화 + 11GB 데이터',
       },
       {
-        planId: '12345',
         planName: '알뜰 5G 무제한',
+        sourceSite: 'moyoplan',
+        detailUrl: 'https://www.moyoplan.com/plans/12345',
         mvno: '유모바일',
-        network: 'SKT망',
+        network: 'SKT',
         technology: '5G',
         pricePromo: 35000,
         priceOriginal: 40000,
@@ -532,10 +776,11 @@ export class CrawlerService {
         benefitSummary: '12개월 할인, 무제한 통화 + 무제한 데이터',
       },
       {
-        planId: '67890',
         planName: '프리티 프리미엄',
+        sourceSite: 'moyoplan',
+        detailUrl: 'https://www.moyoplan.com/plans/67890',
         mvno: '프리티',
-        network: 'KT망',
+        network: 'KT',
         technology: '5G',
         pricePromo: 55000,
         priceOriginal: null,
@@ -557,31 +802,73 @@ export class CrawlerService {
    * 크롤링 및 DB 저장 메인 메서드
    *
    * @param useDemo true면 더미 데이터, false면 실제 크롤링
+   * @param sources 크롤링할 소스 배열 (기본값: ['moyo', 'uplus'])
    * @returns Upsert된 요금제 데이터 배열
    */
-  async crawlAndSavePlans(useDemo = true): Promise<RawPlan[]> {
+  async crawlAndSavePlans(
+    useDemo = true,
+    sources: ('moyo' | 'uplus')[] = ['moyo', 'uplus'],
+  ): Promise<RawPlan[]> {
     try {
       this.logger.log('크롤러 워크플로우 시작...');
 
-      // 1. 크롤링 또는 더미 데이터 생성
-      const crawledPlans = useDemo ? await this.crawlPlansDemo() : await this.crawlPlans();
+      let crawledPlans: CrawledPlanData[] = [];
+
+      if (useDemo) {
+        // 1-A. 더미 데이터 생성
+        crawledPlans = this.crawlPlansDemo();
+      } else {
+        // 1-B. 실제 크롤링 (병렬 실행)
+        const crawlTasks: Promise<CrawledPlanData[]>[] = [];
+
+        if (sources.includes('moyo')) {
+          crawlTasks.push(
+            this.crawlPlans().catch((error) => {
+              this.logger.error('Moyo 크롤링 실패:', error);
+              return []; // 실패 시 빈 배열 반환
+            }),
+          );
+        }
+
+        if (sources.includes('uplus')) {
+          crawlTasks.push(
+            this.crawlPlansUplus().catch((error) => {
+              this.logger.error('U+ 크롤링 실패:', error);
+              return []; // 실패 시 빈 배열 반환
+            }),
+          );
+        }
+
+        // Promise.allSettled로 병렬 실행 (일부 실패해도 계속 진행)
+        const results = await Promise.allSettled(crawlTasks);
+
+        crawledPlans = results
+          .filter((result) => result.status === 'fulfilled')
+          .flatMap((result) => result.value);
+
+        this.logger.log(
+          `크롤링 완료: Moyo ${sources.includes('moyo') ? '✓' : '✗'}, U+ ${sources.includes('uplus') ? '✓' : '✗'}`,
+        );
+      }
 
       this.logger.log(`${crawledPlans.length}개 요금제 데이터 추출 완료`);
 
-      // 2. Upsert: planId 기준으로 데이터 삽입/업데이트
+      // 2. Upsert: dataHash 기준으로 데이터 삽입/업데이트
       const upsertedPlans: RawPlan[] = [];
 
       for (const plan of crawledPlans) {
         try {
-          // dataHash 생성
+          // dataHash 생성 (sourceSite + planName + 핵심 스펙 조합)
           const dataHash = this.generateDataHash(plan);
 
           const upsertedPlan = await this.prisma.rawPlan.upsert({
             where: {
-              planId: plan.planId,
+              dataHash, // dataHash를 Upsert 기준으로 사용
             },
             update: {
-              dataHash,
+              planName: plan.planName,
+              sourceSite: plan.sourceSite,
+              detailUrl: plan.detailUrl,
               mvno: plan.mvno,
               network: plan.network,
               technology: plan.technology,
@@ -597,8 +884,10 @@ export class CrawlerService {
               updatedAt: new Date(),
             },
             create: {
-              planId: plan.planId,
+              planName: plan.planName,
               dataHash,
+              sourceSite: plan.sourceSite,
+              detailUrl: plan.detailUrl,
               mvno: plan.mvno,
               network: plan.network,
               technology: plan.technology,
@@ -615,9 +904,9 @@ export class CrawlerService {
           });
 
           upsertedPlans.push(upsertedPlan);
-          this.logger.debug(`Upsert 완료: ${upsertedPlan.planId}`);
+          this.logger.debug(`Upsert 완료: ${upsertedPlan.planName} (${upsertedPlan.sourceSite})`);
         } catch (error) {
-          this.logger.error(`Upsert 실패: ${plan.planId}`, error);
+          this.logger.error(`Upsert 실패: ${plan.planName} (${plan.sourceSite})`, error);
         }
       }
 
