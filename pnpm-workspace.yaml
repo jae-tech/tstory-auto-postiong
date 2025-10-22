@@ -3,6 +3,7 @@ ignoredBuiltDependencies:
   - '@prisma/client'
   - '@prisma/engines'
   - '@swc/core'
+  - esbuild
   - prisma
   - puppeteer
   - unrs-resolver
