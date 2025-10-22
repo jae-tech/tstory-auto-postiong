@@ -13,7 +13,6 @@ export interface CrawlerTestResult {
   success: boolean;
   totalCount: number;
   plans: Array<{
-    planId: string;
     mvno: string;
     network: string;
     technology: string;
@@ -97,6 +96,46 @@ export class TestService {
   }
 
   /**
+   * U+ 알뜰폰 크롤러 테스트 실행
+   *
+   * U+ 알뜰폰 공식몰만 크롤링하여 결과를 반환합니다.
+   *
+   * @returns 크롤러 테스트 결과 객체
+   */
+  async runCrawlerTestUplus(): Promise<CrawlerTestResult> {
+    try {
+      this.logger.log('U+ 알뜰폰 크롤러 테스트 시작');
+
+      // U+ 알뜰폰만 크롤링
+      const crawledPlans: RawPlan[] = await this.crawlerService.crawlAndSavePlans(false, [
+        'uplus',
+      ]);
+
+      const result: CrawlerTestResult = {
+        success: true,
+        totalCount: crawledPlans.length,
+        plans: crawledPlans,
+        timestamp: new Date().toISOString(),
+        message: `U+ 알뜰폰 크롤링 성공: ${crawledPlans.length}개 요금제가 DB에 Upsert되었습니다.`,
+      };
+
+      this.logger.log(`U+ 알뜰폰 크롤러 테스트 완료: ${crawledPlans.length}개 요금제 처리됨`);
+
+      return result;
+    } catch (error) {
+      this.logger.error('U+ 알뜰폰 크롤러 테스트 실패:', error);
+
+      return {
+        success: false,
+        totalCount: 0,
+        plans: [],
+        timestamp: new Date().toISOString(),
+        message: `U+ 알뜰폰 크롤링 실패: ${error.message}`,
+      };
+    }
+  }
+
+  /**
    * Gemini 일괄 분석 테스트 실행
    *
    * DB의 모든 요금제를 조회하여 Gemini API로 일괄 분석합니다.
@@ -129,7 +168,7 @@ export class TestService {
       this.logger.log(`${plans.length}개 요금제 데이터로 비교형 블로그 생성 실행`);
 
       // 분석기 워크플로우 실행
-      const result = await this.analyzerService.runAnalyzer();
+      const result = await this.analyzerService.runFullAnalysis();
 
       if (!result.success) {
         return {

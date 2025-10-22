@@ -43,6 +43,26 @@ export class TestController {
   }
 
   /**
+   * U+ 알뜰폰 크롤러 테스트 엔드포인트
+   *
+   * POST /test/run-crawler-uplus
+   *
+   * U+ 알뜰폰 공식몰만 크롤링하여 결과를 반환합니다.
+   *
+   * @returns 크롤링 결과 및 DB Upsert 정보
+   */
+  @Post('run-crawler-uplus')
+  async runCrawlerUplus(): Promise<CrawlerTestResult> {
+    this.logger.log('U+ 알뜰폰 크롤러 테스트 요청 수신');
+
+    const result = await this.testService.runCrawlerTestUplus();
+
+    this.logger.log(`U+ 알뜰폰 크롤러 테스트 응답: ${result.message}`);
+
+    return result;
+  }
+
+  /**
    * Gemini 일괄 분석 테스트 엔드포인트
    *
    * POST /test/run-gemini
@@ -160,6 +180,12 @@ export class TestController {
           path: '/test/run-crawler?useDemo=false',
           description: '크롤러 실행 (실제 크롤링)',
           example: 'POST http://localhost:3000/test/run-crawler?useDemo=false',
+        },
+        {
+          method: 'POST',
+          path: '/test/run-crawler-uplus',
+          description: 'U+ 알뜰폰 크롤러 테스트 (실제 크롤링)',
+          example: 'POST http://localhost:3000/test/run-crawler-uplus',
         },
         {
           method: 'POST',
