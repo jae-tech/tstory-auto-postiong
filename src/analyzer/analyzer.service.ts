@@ -15,14 +15,16 @@ interface HtmlPost {
 }
 
 /**
- * 사용자 유형별 요금제 분류 결과 (2025년 실사용 목적 기준)
+ * 사용자 유형별 요금제 분류 결과 (7가지 카테고리)
  */
 interface UserTypeClassification {
-  subLine: RawPlan[]; // 서브회선용 초저가 요금제
-  carNavi: RawPlan[]; // 차량 네비게이션용 요금제
-  business: RawPlan[]; // 업무·영업용 실속 요금제
-  throttledUnlimited: RawPlan[]; // 속도제한 무제한형 요금제
-  promotion: RawPlan[]; // 프로모션형 '메뚜기족' 요금제
+  navigation: RawPlan[]; // 네비게이션용 요금제
+  subLine: RawPlan[]; // 서브회선/세컨드폰용 요금제
+  tablet: RawPlan[]; // 태블릿/스마트기기 전용 요금제
+  kidsSenior: RawPlan[]; // 어린이/시니어 특화 요금제
+  business: RawPlan[]; // 업무/비즈니스 전용 요금제
+  promotion: RawPlan[]; // 프로모션 한정 요금제
+  lifetime: RawPlan[]; // 평생형/상시할인 요금제
 }
 
 /**
@@ -58,7 +60,7 @@ export class AnalyzerService {
   }
 
   /**
-   * 배치 분석을 위한 Gemini 프롬프트 생성
+   * 배치 분석을 위한 Gemini 프롬프트 생성 (7가지 카테고리)
    */
   private buildBatchAnalysisPrompt(chunk: RawPlan[]): string {
     const formattedPlans = chunk.map((plan) => ({
@@ -82,52 +84,64 @@ export class AnalyzerService {
 
 ${JSON.stringify(formattedPlans, null, 2)}
 
-아래 5가지 사용자 유형으로 분류하고, 각 유형별 TOP5 요금제를 JSON 형태로 반환하세요.
+아래 7가지 사용 목적별 카테고리로 분류하고, 각 카테고리별 TOP5 요금제를 JSON 형태로 반환하세요.
 
-유형 분류 기준 (2025년 실사용 목적 기준):
+🧩 분류 카테고리 (총 7개)
 
-1️⃣ **서브회선용 초저가 요금제**
-   - 보조폰, 아이폰 세컨드폰, 자녀폰용
-   - 데이터 3GB 이하, 월 1만원 미만
+1️⃣ **네비게이션용 요금제**
+   - 차량 내비게이션, 블랙박스, 공기계 등 저용량 데이터 전용
+   - 월 0~1GB, 1천~2천원대
 
-2️⃣ **차량 네비게이션용 요금제**
-   - 차량 내비, 블랙박스, IoT 장비용
-   - 데이터 3~10GB, 월 1만원 이하
+2️⃣ **서브회선/세컨드폰용 요금제**
+   - OTP·인증용, 듀얼심, 업무용 서브폰
+   - 100~300분 통화, 1GB 내외, 1~3천원대
 
-3️⃣ **업무·영업용 실속 요금제**
-   - 통화량 많고 데이터는 중간 정도
-   - 통화 1000분 이상 또는 무제한, 데이터 3~10GB
+3️⃣ **태블릿/스마트기기 전용 요금제**
+   - 태블릿, 러닝패드, IoT 기기 등 데이터 전용
+   - 1~10GB, 3~8천원대
 
-4️⃣ **속도제한 무제한형 요금제**
-   - 데이터 많이 쓰지만 저렴한 무제한을 찾는 사용자
-   - 데이터 100GB 이상 or 속도제한 3~5Mbps 이상
+4️⃣ **어린이/시니어 특화 요금제**
+   - 간단한 통화 중심, 음성무제한, 소량 데이터
+   - 3~5천원대
 
-5️⃣ **프로모션형 '메뚜기족' 요금제**
-   - 3~6개월 단기 할인 프로모션 중심
-   - promotionDurationMonths 값이 1~6개월
+5️⃣ **업무/비즈니스 전용 요금제**
+   - 통화량 많고, 데이터 5~20GB, 프로모션형 중심
+   - 5천~1만원대
+
+6️⃣ **프로모션 한정 요금제**
+   - 단기 이벤트성 요금제 (3~12개월 할인형)
+   - promotionDurationMonths 값이 1~12 사이
+
+7️⃣ **평생형/상시할인 요금제**
+   - 프로모션 없이 상시 저가형 (promotionDurationMonths = 999)
+   - 장기 사용자 중심의 실속 요금제
 
 반환 형식 (반드시 유효한 JSON만 출력):
 {
-  "서브회선용 초저가 요금제": [요금제 id 배열 (최대 5개)],
-  "차량 네비게이션용 요금제": [요금제 id 배열 (최대 5개)],
-  "업무·영업용 실속 요금제": [요금제 id 배열 (최대 5개)],
-  "속도제한 무제한형 요금제": [요금제 id 배열 (최대 5개)],
-  "프로모션형 메뚜기족 요금제": [요금제 id 배열 (최대 5개)]
+  "네비게이션용": [요금제 id 배열 (최대 5개)],
+  "서브회선세컨드폰용": [요금제 id 배열 (최대 5개)],
+  "태블릿스마트기기용": [요금제 id 배열 (최대 5개)],
+  "어린이시니어용": [요금제 id 배열 (최대 5개)],
+  "업무비즈니스용": [요금제 id 배열 (최대 5개)],
+  "프로모션형": [요금제 id 배열 (최대 5개)],
+  "평생형": [요금제 id 배열 (최대 5개)]
 }
 
 예시:
 {
-  "서브회선용 초저가 요금제": [123, 456, 789, 234, 567],
-  "차량 네비게이션용 요금제": [234, 567, 890, 345, 678],
-  "업무·영업용 실속 요금제": [345, 678, 901, 456, 789],
-  "속도제한 무제한형 요금제": [456, 789, 012, 567, 890],
-  "프로모션형 메뚜기족 요금제": [567, 890, 123, 678, 901]
+  "네비게이션용": [123, 456, 789, 234, 567],
+  "서브회선세컨드폰용": [234, 567, 890, 345, 678],
+  "태블릿스마트기기용": [345, 678, 901, 456, 789],
+  "어린이시니어용": [456, 789, 012, 567, 890],
+  "업무비즈니스용": [567, 890, 123, 678, 901],
+  "프로모션형": [678, 901, 234, 789, 012],
+  "평생형": [789, 012, 345, 890, 123]
 }
 
 주의사항:
 - 반드시 순수 JSON 형태로만 응답하세요
 - 코드 블록(\`\`\`json) 사용 금지
-- 각 유형별 최대 5개까지만 선정
+- 각 카테고리별 최대 5개까지만 선정
 - id는 숫자 배열로 반환
 - 설명이나 추가 텍스트 없이 JSON만 출력`;
   }
@@ -232,7 +246,7 @@ ${JSON.stringify(formattedPlans, null, 2)}
   }
 
   /**
-   * 청크 결과 통합: 유형별로 합치고 상위 10개만 남김
+   * 청크 결과 통합: 유형별로 합치고 상위 10개만 남김 (7가지 카테고리)
    */
   mergeChunkResults(results: any[], allPlans: RawPlan[]): UserTypeClassification {
     this.logger.log(`청크 결과 통합 시작: ${results.length}개 청크`);
@@ -245,29 +259,35 @@ ${JSON.stringify(formattedPlans, null, 2)}
 
     // 유형별 요금제 수집 (한글 키로 매핑)
     const aggregated: Record<string, Set<number>> = {
+      navigation: new Set(),
       subLine: new Set(),
-      carNavi: new Set(),
+      tablet: new Set(),
+      kidsSenior: new Set(),
       business: new Set(),
-      throttledUnlimited: new Set(),
       promotion: new Set(),
+      lifetime: new Set(),
     };
 
     // 한글 키 → 영문 키 매핑
     const koreanToEnglishKey: Record<string, keyof UserTypeClassification> = {
-      '서브회선용 초저가 요금제': 'subLine',
-      '차량 네비게이션용 요금제': 'carNavi',
-      '업무·영업용 실속 요금제': 'business',
-      '속도제한 무제한형 요금제': 'throttledUnlimited',
-      '프로모션형 메뚜기족 요금제': 'promotion',
+      네비게이션용: 'navigation',
+      서브회선세컨드폰용: 'subLine',
+      태블릿스마트기기용: 'tablet',
+      어린이시니어용: 'kidsSenior',
+      업무비즈니스용: 'business',
+      프로모션형: 'promotion',
+      평생형: 'lifetime',
     };
 
     // 영문 키 → 한글 키 매핑 (로깅용)
     const englishToKoreanKey: Record<string, string> = {
-      subLine: '서브회선용 초저가',
-      carNavi: '차량 네비게이션용',
-      business: '업무·영업용 실속',
-      throttledUnlimited: '속도제한 무제한형',
-      promotion: '프로모션형 메뚜기족',
+      navigation: '네비게이션용',
+      subLine: '서브회선/세컨드폰용',
+      tablet: '태블릿/스마트기기용',
+      kidsSenior: '어린이/시니어용',
+      business: '업무/비즈니스용',
+      promotion: '프로모션 한정',
+      lifetime: '평생형/상시할인',
     };
 
     // 모든 청크 결과를 통합
@@ -286,11 +306,13 @@ ${JSON.stringify(formattedPlans, null, 2)}
 
     // 각 유형별로 pricePromo 기준 상위 10개만 선정
     const final: UserTypeClassification = {
+      navigation: [],
       subLine: [],
-      carNavi: [],
+      tablet: [],
+      kidsSenior: [],
       business: [],
-      throttledUnlimited: [],
       promotion: [],
+      lifetime: [],
     };
 
     for (const [englishKey, planIdSet] of Object.entries(aggregated)) {
@@ -328,11 +350,13 @@ ${JSON.stringify(formattedPlans, null, 2)}
       if (plans.length === 0) {
         this.logger.warn('분석할 요금제가 없습니다');
         return {
+          navigation: [],
           subLine: [],
-          carNavi: [],
+          tablet: [],
+          kidsSenior: [],
           business: [],
-          throttledUnlimited: [],
           promotion: [],
+          lifetime: [],
         };
       }
 
@@ -344,11 +368,13 @@ ${JSON.stringify(formattedPlans, null, 2)}
 
       this.logger.log('========== 배치 분석 워크플로우 완료 ==========');
       this.logger.log(`최종 결과:`);
-      this.logger.log(`- 서브회선용 초저가: ${merged.subLine.length}개`);
-      this.logger.log(`- 차량 네비게이션용: ${merged.carNavi.length}개`);
-      this.logger.log(`- 업무·영업용 실속: ${merged.business.length}개`);
-      this.logger.log(`- 속도제한 무제한형: ${merged.throttledUnlimited.length}개`);
-      this.logger.log(`- 프로모션형 메뚜기족: ${merged.promotion.length}개`);
+      this.logger.log(`- 네비게이션용: ${merged.navigation.length}개`);
+      this.logger.log(`- 서브회선/세컨드폰용: ${merged.subLine.length}개`);
+      this.logger.log(`- 태블릿/스마트기기용: ${merged.tablet.length}개`);
+      this.logger.log(`- 어린이/시니어용: ${merged.kidsSenior.length}개`);
+      this.logger.log(`- 업무/비즈니스용: ${merged.business.length}개`);
+      this.logger.log(`- 프로모션 한정: ${merged.promotion.length}개`);
+      this.logger.log(`- 평생형/상시할인: ${merged.lifetime.length}개`);
 
       return merged;
     } catch (error) {
@@ -625,49 +651,204 @@ ${JSON.stringify(formattedPlans, null, 2)}
       const year = today.getFullYear();
       const month = today.getMonth() + 1;
 
-      // 유형별 요금제를 JSON 문자열로 변환 (Gemini API는 한글 키 사용)
+      // 유형별 요금제를 JSON 문자열로 변환 (7가지 카테고리)
       const formattedData = {
-        서브회선용_초저가_요금제: this.formatPlansForBlog(mergedResults.subLine),
-        차량_네비게이션용_요금제: this.formatPlansForBlog(mergedResults.carNavi),
-        업무_영업용_실속_요금제: this.formatPlansForBlog(mergedResults.business),
-        속도제한_무제한형_요금제: this.formatPlansForBlog(mergedResults.throttledUnlimited),
-        프로모션형_메뚜기족_요금제: this.formatPlansForBlog(mergedResults.promotion),
+        네비게이션용: this.formatPlansForBlog(mergedResults.navigation),
+        서브회선세컨드폰용: this.formatPlansForBlog(mergedResults.subLine),
+        태블릿스마트기기용: this.formatPlansForBlog(mergedResults.tablet),
+        어린이시니어용: this.formatPlansForBlog(mergedResults.kidsSenior),
+        업무비즈니스용: this.formatPlansForBlog(mergedResults.business),
+        프로모션형: this.formatPlansForBlog(mergedResults.promotion),
+        평생형: this.formatPlansForBlog(mergedResults.lifetime),
       };
 
       // 현재 날짜의 주차 계산
       const weekOfMonth = this.getWeekOfMonth(today);
       const day = today.getDate();
 
-      const prompt = `너는 데이터 중심의 블로거다.
-아래는 알뜰폰 요금제 분석 결과이다:
+      const prompt = `너는 알뜰폰 요금제 데이터를 분석해
+사용 목적별로 7가지 카테고리로 분류하고,
+각 카테고리마다 하나의 <section>과 하나의 <table>로 구성된
+SEO 최적화 HTML 콘텐츠를 생성하는 시스템이다.
 
+설명 문장이나 추천 문구 없이
+검색엔진 친화적 <section> 구조와 <table> 데이터만 출력한다.
+
+🧩 분류 카테고리 (총 7개)
+
+1️⃣ 네비게이션용 요금제
+차량 내비게이션, 블랙박스, 공기계 등 저용량 데이터 전용
+월 0~1GB, 1천~2천원대
+
+2️⃣ 서브회선 / 세컨드폰용 요금제
+OTP·인증용, 듀얼심, 업무용 서브폰
+100~300분 통화, 1GB 내외, 1~3천원대
+
+3️⃣ 태블릿 / 스마트기기 전용 요금제
+태블릿, 러닝패드, IoT 기기 등 데이터 전용
+1~10GB, 3~8천원대
+
+4️⃣ 어린이 / 시니어 특화 요금제
+간단한 통화 중심, 음성무제한, 소량 데이터
+3~5천원대
+
+5️⃣ 업무 / 비즈니스 전용 요금제
+통화량 많고, 데이터 5~20GB, 프로모션형 중심
+5천~1만원대
+
+6️⃣ 프로모션 한정 요금제
+단기 이벤트성 요금제 (3~12개월 할인형)
+프로모션 기간 존재 (promotionMonth > 0)
+
+7️⃣ 평생형 / 상시할인 요금제
+프로모션 없이 상시 저가형 (promotionMonth = "평생" 또는 999)
+장기 사용자 중심의 실속 요금제
+
+📋 출력 구조 (카테고리당 단일 테이블)
+
+<section id="category-id" class="plan-section">
+  <h2>네비게이션용 알뜰폰 요금제 TOP 15 (통신사별 추천)</h2>
+  <p class="desc">차량 내비게이션과 블랙박스에 적합한 소량 데이터 알뜰폰 요금제 비교표입니다.</p>
+
+  <table class="plan-table" aria-label="네비게이션용 알뜰폰 요금제 비교표">
+    <thead>
+      <tr>
+        <th scope="col">통신망</th>
+        <th scope="col">요금제명</th>
+        <th scope="col">사업자</th>
+        <th scope="col">데이터</th>
+        <th scope="col">통화</th>
+        <th scope="col">월 요금</th>
+        <th scope="col">프로모션 기간</th>
+        <th scope="col">프로모션 종료 후 요금</th>
+        <th scope="col">혜택</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="9" class="carrier-sep">LG U+</td></tr>
+      …LG U+ 5개…
+      <tr><td colspan="9" class="carrier-sep">KT</td></tr>
+      …KT 5개…
+      <tr><td colspan="9" class="carrier-sep">SKT</td></tr>
+      …SKT 5개…
+    </tbody>
+  </table>
+</section>
+
+🔧 데이터 처리 규칙
+
+통신사 순서: LG U+ → KT → SKT
+통신사별 최대 5개 (Top 5)
+내부 정렬: 월 요금 오름차순
+promotionMonth 해석:
+  null, undefined, 0, "null개월", "평생", 999 → "평생"
+  숫자면 "\${promotionMonth}개월"
+afterPromotionPrice 없으면 "-"
+benefits 배열은 쉼표로 결합, 없으면 "-"
+network 정규화:
+  "lguplus", "lg u+", "lg" → "LG U+"
+  "kt", "olleh" → "KT"
+  "skt", "sk telecom" → "SKT"
+가격 천 단위 표기: "3,300원"
+데이터 결합: "10GB + 3Mbps"
+null/undefined 값은 "-"
+
+⚙️ SEO 구조 규칙
+
+<section> = 카테고리 구분 단위
+<h2> = "알뜰폰 요금제 + 카테고리명 + TOP" 형태
+<p class="desc"> = 카테고리 핵심 키워드 요약문 (AI 자동 생성 허용)
+<table aria-label> = 접근성 및 SEO 인덱싱 강화
+<th scope="col"> = 구조화 데이터 인식 지원
+<tr class="carrier-sep"> = 통신사 구분 시각화
+설명문, 요약문, 불필요한 텍스트 출력 금지
+
+📎 입력 데이터
 ${JSON.stringify(formattedData, null, 2)}
 
-HTML 블로그 글을 생성하라.
+💡 출력 예시
 
-규칙:
-1. <h2>로 5개 섹션 구성: 서브회선용 초저가 / 차량 네비게이션용 / 업무·영업용 실속 / 속도제한 무제한형 / 프로모션형 메뚜기족
-2. 각 섹션은 2~3문장 개요 + <table> 비교표 + 2~3문장 분석
-3. 제목: "${year}년 ${month}월 ${weekOfMonth}째주 알뜰폰 요금제 추천 TOP 25 (${month}월 ${day}일 수정)"
-4. SEO 키워드 '알뜰폰 요금제', '가성비', '보조폰', '무제한', '통신비 절약'을 자연스럽게 포함
-5. 아이콘, 이모지, 불필요한 강조 금지
-6. HTML 구조는 <h2>, <h3>, <table>, <p>, <ul>, <li>만 사용
-7. 문장은 사실 중심, 자연스러운 설명체
-8. 표는 반드시 <thead>, <tbody> 구조 사용
-9. 각 유형별 설명:
-   - 서브회선용 초저가: 보조폰, 세컨드폰, 자녀폰 (데이터 3GB 이하, 1만원 미만)
-   - 차량 네비게이션용: 차량 내비, 블랙박스, IoT (데이터 3~10GB, 1만원 이하)
-   - 업무·영업용 실속: 통화 많은 사용자 (통화 1000분 이상, 데이터 3~10GB)
-   - 속도제한 무제한형: 저렴한 무제한 (데이터 100GB 이상 or 속도 3~5Mbps)
-   - 프로모션형 메뚜기족: 단기 할인 (3~6개월 프로모션)
+<section id="promotion" class="plan-section">
+  <h2>프로모션 한정 알뜰폰 요금제 TOP 15 (기간 한정 할인형)</h2>
+  <p class="desc">3~12개월 단기 프로모션으로 구성된 알뜰폰 요금제 모음입니다.</p>
+  <table class="plan-table" aria-label="프로모션 한정 알뜰폰 요금제 비교표">
+    <thead>
+      <tr>
+        <th scope="col">통신망</th>
+        <th scope="col">요금제명</th>
+        <th scope="col">사업자</th>
+        <th scope="col">데이터</th>
+        <th scope="col">통화</th>
+        <th scope="col">월 요금</th>
+        <th scope="col">프로모션 기간</th>
+        <th scope="col">프로모션 종료 후 요금</th>
+        <th scope="col">혜택</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="9" class="carrier-sep">LG U+</td></tr>
+      <tr>
+        <td>LG U+</td>
+        <td>[N페이 5천P] 토스 실속 300분 5.5GB+</td>
+        <td>토스모바일</td>
+        <td>5.5GB</td>
+        <td>300분</td>
+        <td>180원</td>
+        <td>6개월</td>
+        <td>3,300원</td>
+        <td>네이버페이 5천P</td>
+      </tr>
+      <tr><td colspan="9" class="carrier-sep">KT</td></tr>
+      …KT 요금제 5개…
+      <tr><td colspan="9" class="carrier-sep">SKT</td></tr>
+      …SKT 요금제 5개…
+    </tbody>
+  </table>
+</section>
 
-10. 최종 출력(JSON):
+<section id="lifetime" class="plan-section">
+  <h2>평생형 알뜰폰 요금제 TOP 15 (상시할인형)</h2>
+  <p class="desc">프로모션 없이 항상 동일 요금으로 이용 가능한 장기 실속형 알뜰폰 요금제입니다.</p>
+  <table class="plan-table" aria-label="평생형 알뜰폰 요금제 비교표">
+    <thead>
+      <tr>
+        <th scope="col">통신망</th>
+        <th scope="col">요금제명</th>
+        <th scope="col">사업자</th>
+        <th scope="col">데이터</th>
+        <th scope="col">통화</th>
+        <th scope="col">월 요금</th>
+        <th scope="col">프로모션 기간</th>
+        <th scope="col">프로모션 종료 후 요금</th>
+        <th scope="col">혜택</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="9" class="carrier-sep">LG U+</td></tr>
+      …LG U+ 평생형 5개…
+      <tr><td colspan="9" class="carrier-sep">KT</td></tr>
+      …KT 평생형 5개…
+      <tr><td colspan="9" class="carrier-sep">SKT</td></tr>
+      …SKT 평생형 5개…
+    </tbody>
+  </table>
+</section>
+
+최종 출력(JSON):
 {
-  "title": "...",
-  "htmlBody": "<h2>...</h2><p>...</p>...",
-  "tags": ["알뜰폰", "요금제", "가성비", "무제한", "보조폰"],
+  "title": "${year}년 ${month}월 ${weekOfMonth}째주 알뜰폰 요금제 추천 TOP 35 (${month}월 ${day}일 수정)",
+  "htmlBody": "<section id=\\"navigation\\" class=\\"plan-section\\">...</section><section id=\\"sub-line\\">...</section>...",
+  "tags": ["알뜰폰", "요금제", "가성비", "무제한", "네비게이션용", "프로모션"],
   "description": "150자 이내 요약"
 }
+
+✅ SEO 포인트 요약:
+- <section>: 각 주제별 콘텐츠 블록
+- <h2>: 검색엔진이 인식하는 핵심 키워드 영역
+- <p class="desc">: 구글·네이버 스니펫용 요약문
+- <table aria-label>: "비교", "추천", "요금제" 키워드 인덱싱 강화
+- <th scope="col">: 데이터 구조 명확화
+- 평생형/프로모션형 분리: 키워드 다양성 및 CTR(클릭률) 향상
 
 반드시 순수 JSON만 반환하고, 코드 블록(\`\`\`json) 사용 금지.`;
 
@@ -712,52 +893,156 @@ HTML 블로그 글을 생성하라.
   }
 
   /**
-   * 요금제 목록을 블로그용 JSON 포맷으로 변환
+   * 통신사 정규화 헬퍼 함수
+   */
+  private normalizeNetwork(network: string): string {
+    const normalized = network.toLowerCase().trim();
+    if (normalized.includes('lgu') || normalized.includes('lg u+') || normalized === 'lg') {
+      return 'LG U+';
+    } else if (normalized.includes('kt') || normalized.includes('olleh')) {
+      return 'KT';
+    } else if (
+      normalized.includes('skt') ||
+      normalized.includes('sk telecom') ||
+      normalized === 'sk'
+    ) {
+      return 'SKT';
+    }
+    return network; // 원본 반환
+  }
+
+  /**
+   * 통신사별 정렬 우선순위
+   */
+  private getNetworkPriority(network: string): number {
+    const normalized = this.normalizeNetwork(network);
+    switch (normalized) {
+      case 'LG U+':
+        return 1;
+      case 'KT':
+        return 2;
+      case 'SKT':
+        return 3;
+      default:
+        return 999; // 기타 통신사는 맨 뒤
+    }
+  }
+
+  /**
+   * 요금제 목록을 블로그용 JSON 포맷으로 변환 (통신사별 정렬 포함)
    */
   private formatPlansForBlog(plans: RawPlan[]): any[] {
-    return plans.map((plan) => ({
+    // 1. 통신사별 정렬 (LG U+ → KT → SKT), 그 다음 월 요금 오름차순
+    const sorted = [...plans].sort((a, b) => {
+      const priorityA = this.getNetworkPriority(a.network);
+      const priorityB = this.getNetworkPriority(b.network);
+
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+
+      // 같은 통신사 내에서는 월 요금 오름차순
+      return a.pricePromo - b.pricePromo;
+    });
+
+    // 2. JSON 포맷으로 변환
+    return sorted.map((plan) => ({
       planName: plan.planName,
       mvno: plan.mvno,
-      network: plan.network,
+      network: this.normalizeNetwork(plan.network),
       dataGB: plan.dataBaseGB === 999 ? '무제한' : `${plan.dataBaseGB}GB`,
+      dataSpeedMbps: plan.dataPostSpeedMbps ? `${plan.dataPostSpeedMbps}Mbps` : null,
       talk: plan.talkMinutes === 9999 ? '무제한' : `${plan.talkMinutes}분`,
       price: `${plan.pricePromo.toLocaleString()}원`,
+      priceOriginal: plan.priceOriginal ? `${plan.priceOriginal.toLocaleString()}원` : null,
       promotion:
         plan.promotionDurationMonths === 999 ? '평생' : `${plan.promotionDurationMonths}개월`,
+      benefits: plan.benefitSummary || null,
     }));
   }
 
   /**
-   * Gemini 응답 실패 시 Fallback HTML 생성
+   * Gemini 응답 실패 시 Fallback HTML 생성 (7가지 카테고리)
    */
   private buildFallbackHtml(mergedResults: UserTypeClassification): string {
     const today = new Date();
     const year = today.getFullYear();
     const month = today.getMonth() + 1;
 
-    let html = `<h2>${year}년 ${month}월 알뜰폰 요금제 추천 (실사용자 맞춤형)</h2>\n`;
-    html += `<p>최신 알뜰폰 요금제를 실사용 목적별로 정리했습니다.</p>\n`;
+    let html = `<h2>${year}년 ${month}월 알뜰폰 요금제 추천 (사용 목적별 맞춤형)</h2>\n`;
+    html += `<p>최신 알뜰폰 요금제를 7가지 사용 목적별로 정리했습니다.</p>\n`;
 
     const sections = [
-      { key: 'subLine', title: '서브회선용 초저가 요금제' },
-      { key: 'carNavi', title: '차량 네비게이션용 요금제' },
-      { key: 'business', title: '업무·영업용 실속 요금제' },
-      { key: 'throttledUnlimited', title: '속도제한 무제한형 요금제' },
-      { key: 'promotion', title: '프로모션형 메뚜기족 요금제' },
+      { key: 'navigation', title: '네비게이션용 요금제', id: 'navigation' },
+      { key: 'subLine', title: '서브회선/세컨드폰용 요금제', id: 'sub-line' },
+      { key: 'tablet', title: '태블릿/스마트기기 전용 요금제', id: 'tablet' },
+      { key: 'kidsSenior', title: '어린이/시니어 특화 요금제', id: 'kids-senior' },
+      { key: 'business', title: '업무/비즈니스 전용 요금제', id: 'business' },
+      { key: 'promotion', title: '프로모션 한정 요금제', id: 'promotion' },
+      { key: 'lifetime', title: '평생형/상시할인 요금제', id: 'lifetime' },
     ];
 
     for (const section of sections) {
       const plans = mergedResults[section.key as keyof UserTypeClassification];
       if (plans.length > 0) {
-        html += `<h3>${section.title}</h3>\n`;
-        html += `<table>\n<thead><tr><th>요금제</th><th>사업자</th><th>데이터</th><th>통화</th><th>가격</th></tr></thead>\n<tbody>\n`;
+        html += `<section id="${section.id}" class="plan-section">\n`;
+        html += `  <h3>${section.title}</h3>\n`;
+        html += `  <table class="plan-table">\n`;
+        html += `    <thead>\n`;
+        html += `      <tr>\n`;
+        html += `        <th scope="col">통신망</th>\n`;
+        html += `        <th scope="col">요금제명</th>\n`;
+        html += `        <th scope="col">사업자</th>\n`;
+        html += `        <th scope="col">데이터</th>\n`;
+        html += `        <th scope="col">통화</th>\n`;
+        html += `        <th scope="col">월 요금</th>\n`;
+        html += `        <th scope="col">프로모션 기간</th>\n`;
+        html += `      </tr>\n`;
+        html += `    </thead>\n`;
+        html += `    <tbody>\n`;
 
-        plans.slice(0, 5).forEach((plan) => {
+        // 통신사별 정렬
+        const sortedPlans = [...plans]
+          .sort((a, b) => {
+            const priorityA = this.getNetworkPriority(a.network);
+            const priorityB = this.getNetworkPriority(b.network);
+            if (priorityA !== priorityB) return priorityA - priorityB;
+            return a.pricePromo - b.pricePromo;
+          })
+          .slice(0, 10);
+
+        let currentNetwork = '';
+        sortedPlans.forEach((plan) => {
+          const network = this.normalizeNetwork(plan.network);
+          if (network !== currentNetwork) {
+            currentNetwork = network;
+            html += `      <tr><td colspan="7" class="carrier-sep">${network}</td></tr>\n`;
+          }
+
           const talk = plan.talkMinutes === 9999 ? '무제한' : `${plan.talkMinutes}분`;
-          html += `<tr><td>${plan.planName}</td><td>${plan.mvno}</td><td>${plan.dataBaseGB}GB</td><td>${talk}</td><td>${plan.pricePromo.toLocaleString()}원</td></tr>\n`;
+          const data =
+            plan.dataBaseGB === 999
+              ? '무제한'
+              : plan.dataPostSpeedMbps
+                ? `${plan.dataBaseGB}GB + ${plan.dataPostSpeedMbps}Mbps`
+                : `${plan.dataBaseGB}GB`;
+          const promo =
+            plan.promotionDurationMonths === 999 ? '평생' : `${plan.promotionDurationMonths}개월`;
+
+          html += `      <tr>\n`;
+          html += `        <td>${network}</td>\n`;
+          html += `        <td>${plan.planName}</td>\n`;
+          html += `        <td>${plan.mvno}</td>\n`;
+          html += `        <td>${data}</td>\n`;
+          html += `        <td>${talk}</td>\n`;
+          html += `        <td>${plan.pricePromo.toLocaleString()}원</td>\n`;
+          html += `        <td>${promo}</td>\n`;
+          html += `      </tr>\n`;
         });
 
-        html += `</tbody>\n</table>\n`;
+        html += `    </tbody>\n`;
+        html += `  </table>\n`;
+        html += `</section>\n\n`;
       }
     }
 
@@ -956,11 +1241,13 @@ HTML 블로그 글을 생성하라.
           topCount: top10Plans.length,
           analysisData: {
             userTypes: {
+              navigation: mergedResults.navigation.length,
               subLine: mergedResults.subLine.length,
-              carNavi: mergedResults.carNavi.length,
+              tablet: mergedResults.tablet.length,
+              kidsSenior: mergedResults.kidsSenior.length,
               business: mergedResults.business.length,
-              throttledUnlimited: mergedResults.throttledUnlimited.length,
               promotion: mergedResults.promotion.length,
+              lifetime: mergedResults.lifetime.length,
             },
           },
           rankedPlans: {
