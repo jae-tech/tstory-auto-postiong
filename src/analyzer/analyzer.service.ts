@@ -714,6 +714,7 @@ OTP·인증용, 듀얼심, 업무용 서브폰
     <thead>
       <tr>
         <th scope="col">통신망</th>
+        <th scope="col">기술</th>
         <th scope="col">요금제명</th>
         <th scope="col">사업자</th>
         <th scope="col">데이터</th>
@@ -725,11 +726,11 @@ OTP·인증용, 듀얼심, 업무용 서브폰
       </tr>
     </thead>
     <tbody>
-      <tr><td colspan="9" class="carrier-sep">LG U+</td></tr>
+      <tr><td colspan="10" class="carrier-sep">LG U+</td></tr>
       …LG U+ 5개…
-      <tr><td colspan="9" class="carrier-sep">KT</td></tr>
+      <tr><td colspan="10" class="carrier-sep">KT</td></tr>
       …KT 5개…
-      <tr><td colspan="9" class="carrier-sep">SKT</td></tr>
+      <tr><td colspan="10" class="carrier-sep">SKT</td></tr>
       …SKT 5개…
     </tbody>
   </table>
@@ -775,6 +776,7 @@ ${JSON.stringify(formattedData, null, 2)}
     <thead>
       <tr>
         <th scope="col">통신망</th>
+        <th scope="col">기술</th>
         <th scope="col">요금제명</th>
         <th scope="col">사업자</th>
         <th scope="col">데이터</th>
@@ -786,9 +788,10 @@ ${JSON.stringify(formattedData, null, 2)}
       </tr>
     </thead>
     <tbody>
-      <tr><td colspan="9" class="carrier-sep">LG U+</td></tr>
+      <tr><td colspan="10" class="carrier-sep">LG U+</td></tr>
       <tr>
         <td>LG U+</td>
+        <td>LTE</td>
         <td>[N페이 5천P] 토스 실속 300분 5.5GB+</td>
         <td>토스모바일</td>
         <td>5.5GB</td>
@@ -798,9 +801,9 @@ ${JSON.stringify(formattedData, null, 2)}
         <td>3,300원</td>
         <td>네이버페이 5천P</td>
       </tr>
-      <tr><td colspan="9" class="carrier-sep">KT</td></tr>
+      <tr><td colspan="10" class="carrier-sep">KT</td></tr>
       …KT 요금제 5개…
-      <tr><td colspan="9" class="carrier-sep">SKT</td></tr>
+      <tr><td colspan="10" class="carrier-sep">SKT</td></tr>
       …SKT 요금제 5개…
     </tbody>
   </table>
@@ -813,6 +816,7 @@ ${JSON.stringify(formattedData, null, 2)}
     <thead>
       <tr>
         <th scope="col">통신망</th>
+        <th scope="col">기술</th>
         <th scope="col">요금제명</th>
         <th scope="col">사업자</th>
         <th scope="col">데이터</th>
@@ -824,11 +828,11 @@ ${JSON.stringify(formattedData, null, 2)}
       </tr>
     </thead>
     <tbody>
-      <tr><td colspan="9" class="carrier-sep">LG U+</td></tr>
+      <tr><td colspan="10" class="carrier-sep">LG U+</td></tr>
       …LG U+ 평생형 5개…
-      <tr><td colspan="9" class="carrier-sep">KT</td></tr>
+      <tr><td colspan="10" class="carrier-sep">KT</td></tr>
       …KT 평생형 5개…
-      <tr><td colspan="9" class="carrier-sep">SKT</td></tr>
+      <tr><td colspan="10" class="carrier-sep">SKT</td></tr>
       …SKT 평생형 5개…
     </tbody>
   </table>
@@ -950,6 +954,7 @@ ${JSON.stringify(formattedData, null, 2)}
       planName: plan.planName,
       mvno: plan.mvno,
       network: this.normalizeNetwork(plan.network),
+      technology: plan.technology, // LTE 또는 5G
       dataGB: plan.dataBaseGB === 999 ? '무제한' : `${plan.dataBaseGB}GB`,
       dataSpeedMbps: plan.dataPostSpeedMbps ? `${plan.dataPostSpeedMbps}Mbps` : null,
       talk: plan.talkMinutes === 9999 ? '무제한' : `${plan.talkMinutes}분`,
@@ -991,6 +996,7 @@ ${JSON.stringify(formattedData, null, 2)}
         html += `    <thead>\n`;
         html += `      <tr>\n`;
         html += `        <th scope="col">통신망</th>\n`;
+        html += `        <th scope="col">기술</th>\n`;
         html += `        <th scope="col">요금제명</th>\n`;
         html += `        <th scope="col">사업자</th>\n`;
         html += `        <th scope="col">데이터</th>\n`;
@@ -1016,7 +1022,7 @@ ${JSON.stringify(formattedData, null, 2)}
           const network = this.normalizeNetwork(plan.network);
           if (network !== currentNetwork) {
             currentNetwork = network;
-            html += `      <tr><td colspan="7" class="carrier-sep">${network}</td></tr>\n`;
+            html += `      <tr><td colspan="8" class="carrier-sep">${network}</td></tr>\n`;
           }
 
           const talk = plan.talkMinutes === 9999 ? '무제한' : `${plan.talkMinutes}분`;
@@ -1031,6 +1037,7 @@ ${JSON.stringify(formattedData, null, 2)}
 
           html += `      <tr>\n`;
           html += `        <td>${network}</td>\n`;
+          html += `        <td>${plan.technology}</td>\n`;
           html += `        <td>${plan.planName}</td>\n`;
           html += `        <td>${plan.mvno}</td>\n`;
           html += `        <td>${data}</td>\n`;
