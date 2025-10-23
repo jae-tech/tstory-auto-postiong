@@ -870,10 +870,10 @@ ${JSON.stringify(formattedData, null, 2)}
         const weekOfMonth = this.getWeekOfMonth(today);
         const day = today.getDate();
         parsed = {
-          title: `${year}년 ${month}월 ${weekOfMonth}째주 알뜰폰 요금제 추천 TOP 25 (${month}월 ${day}일 수정)`,
+          title: `${year}년 ${month}월 ${weekOfMonth}째주 알뜰폰 요금제 추천 TOP 35 (${month}월 ${day}일 수정)`,
           htmlBody: this.buildFallbackHtml(mergedResults),
-          tags: ['알뜰폰', '요금제', '가성비', '무제한', '보조폰'],
-          description: `${year}년 ${month}월 최신 알뜰폰 요금제 비교 분석`,
+          tags: ['알뜰폰', '요금제', '가성비', '무제한', '보조폰', '네비게이션용', '프로모션'],
+          description: `${year}년 ${month}월 최신 알뜰폰 요금제 7가지 카테고리별 비교 분석`,
         };
       }
 
@@ -887,12 +887,25 @@ ${JSON.stringify(formattedData, null, 2)}
       return {
         title: parsed.title,
         htmlBody: parsed.htmlBody,
-        tags: parsed.tags || ['알뜰폰', '요금제'],
-        description: parsed.description || `${year}년 ${month}월 최신 알뜰폰 요금제 비교`,
+        tags: parsed.tags || ['알뜰폰', '요금제', '가성비', '무제한', '네비게이션용', '프로모션'],
+        description: parsed.description || `${year}년 ${month}월 최신 알뜰폰 요금제 7가지 카테고리별 비교`,
       };
     } catch (error) {
       this.logger.error('블로그 HTML 생성 실패:', error);
-      throw error;
+
+      // 에러 발생 시에도 Fallback HTML 반환 (throw 대신)
+      const nowFallback = new Date();
+      const yearFallback = nowFallback.getFullYear();
+      const monthFallback = nowFallback.getMonth() + 1;
+      const weekOfMonthFallback = this.getWeekOfMonth(nowFallback);
+      const dayFallback = nowFallback.getDate();
+
+      return {
+        title: `${yearFallback}년 ${monthFallback}월 ${weekOfMonthFallback}째주 알뜰폰 요금제 추천 TOP 35 (${monthFallback}월 ${dayFallback}일 수정)`,
+        htmlBody: this.buildFallbackHtml(mergedResults),
+        tags: ['알뜰폰', '요금제', '가성비', '무제한', '보조폰', '네비게이션용', '프로모션'],
+        description: `${yearFallback}년 ${monthFallback}월 최신 알뜰폰 요금제 7가지 카테고리별 비교 분석`,
+      };
     }
   }
 
