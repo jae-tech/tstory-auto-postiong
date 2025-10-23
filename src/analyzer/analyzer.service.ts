@@ -1255,6 +1255,17 @@ ${JSON.stringify(formattedData, null, 2)}
 
       // Step 7: 랭킹 스냅샷 생성 및 TOP 10 요금제 연결
       const top10Plans = plans.slice(0, 10);
+
+      // 디버깅: mergedResults 구조 확인
+      this.logger.debug(`mergedResults keys: ${Object.keys(mergedResults).join(', ')}`);
+      this.logger.debug(`navigation length: ${mergedResults.navigation?.length || 0}`);
+      this.logger.debug(`subLine length: ${mergedResults.subLine?.length || 0}`);
+      this.logger.debug(`tablet length: ${mergedResults.tablet?.length || 0}`);
+      this.logger.debug(`kidsSenior length: ${mergedResults.kidsSenior?.length || 0}`);
+      this.logger.debug(`business length: ${mergedResults.business?.length || 0}`);
+      this.logger.debug(`promotion length: ${mergedResults.promotion?.length || 0}`);
+      this.logger.debug(`lifetime length: ${mergedResults.lifetime?.length || 0}`);
+
       const rankingSnapshot = await this.prisma.rankingSnapshot.create({
         data: {
           rankingHash: currentRankingHash,
