@@ -1261,13 +1261,13 @@ ${JSON.stringify(formattedData, null, 2)}
           topCount: top10Plans.length,
           analysisData: {
             userTypes: {
-              navigation: mergedResults.navigation.length,
-              subLine: mergedResults.subLine.length,
-              tablet: mergedResults.tablet.length,
-              kidsSenior: mergedResults.kidsSenior.length,
-              business: mergedResults.business.length,
-              promotion: mergedResults.promotion.length,
-              lifetime: mergedResults.lifetime.length,
+              navigation: mergedResults.navigation?.length || 0,
+              subLine: mergedResults.subLine?.length || 0,
+              tablet: mergedResults.tablet?.length || 0,
+              kidsSenior: mergedResults.kidsSenior?.length || 0,
+              business: mergedResults.business?.length || 0,
+              promotion: mergedResults.promotion?.length || 0,
+              lifetime: mergedResults.lifetime?.length || 0,
             },
           },
           rankedPlans: {
