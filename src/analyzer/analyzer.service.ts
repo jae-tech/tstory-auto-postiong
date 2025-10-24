@@ -764,6 +764,37 @@ null/undefined 값은 "-"
 <tr class="carrier-sep"> = 통신사 구분 시각화
 설명문, 요약문, 불필요한 텍스트 출력 금지
 
+🎁 혜택 열 정리 규칙
+
+1. 혜택이 아닌 항목 제거:
+   - "망 이용", "속도 제한", "무제한", "LTE", "5G" 등은 제거
+
+2. 혜택 항목 정규화:
+   - 유심비 무료, 유심/eSIM 무료, eSIM 개통 시 비용 면제 → "유심/eSIM 무료 제공"
+   - 배송비 무료, 유심/배송비 무료 → "배송비 무료"
+   - 친구 추천 개통 이벤트 → 그대로 유지
+   - 청소연구소 할인 쿠폰 → 그대로 유지
+   - 원스토어 게임 쿠폰 → 그대로 유지
+   - 리뷰 작성 시 네이버페이, Npay → "리뷰 작성 시 네이버페이 포인트 제공"
+   - 교보e대중교통안심보험, 교보다솜케어 → "교보 안심보험 혜택"
+   - KT 스카이라이프 결합 할인 → 그대로 유지
+   - 알닷 ONLY 실속형 요금제 → 그대로 유지
+
+3. 혜택 표시 순서:
+   ① 유심/eSIM 무료 제공
+   ② 배송비 무료
+   ③ 친구 추천 개통 이벤트
+   ④ 원스토어 게임 쿠폰
+   ⑤ 청소연구소 할인 쿠폰
+   ⑥ 리뷰 작성 시 네이버페이 포인트 제공
+   ⑦ 교보 안심보험 혜택
+   ⑧ KT 스카이라이프 결합 할인
+   ⑨ 알닷 ONLY 실속형 요금제
+   ⑩ 기타
+
+4. 중복 제거: 같은 의미의 혜택은 하나로 통합
+5. 혜택이 없으면 "-" 표시
+
 📎 입력 데이터
 ${JSON.stringify(formattedData, null, 2)}
 
@@ -846,6 +877,10 @@ ${JSON.stringify(formattedData, null, 2)}
   "description": "150자 이내 요약"
 }
 
+⚠️ 중요: title 필드는 반드시 위 형식 그대로 사용하세요.
+현재 날짜: ${year}년 ${month}월 ${day}일
+절대로 다른 날짜(예: 2024년 5월)를 사용하지 마세요!
+
 ✅ SEO 포인트 요약:
 - <section>: 각 주제별 콘텐츠 블록
 - <h2>: 검색엔진이 인식하는 핵심 키워드 영역
@@ -869,9 +904,12 @@ ${JSON.stringify(formattedData, null, 2)}
         // Graceful degrade: 기본 구조 생성
         const weekOfMonth = this.getWeekOfMonth(today);
         const day = today.getDate();
+        const fallbackHtml = this.buildFallbackHtml(mergedResults);
+        const fallbackHtmlWithCss = this.injectTableCss(fallbackHtml);
+
         parsed = {
           title: `${year}년 ${month}월 ${weekOfMonth}째주 알뜰폰 요금제 추천 TOP 35 (${month}월 ${day}일 수정)`,
-          htmlBody: this.buildFallbackHtml(mergedResults),
+          htmlBody: fallbackHtmlWithCss,
           tags: ['알뜰폰', '요금제', '가성비', '무제한', '보조폰', '네비게이션용', '프로모션'],
           description: `${year}년 ${month}월 최신 알뜰폰 요금제 7가지 카테고리별 비교 분석`,
         };
@@ -882,11 +920,24 @@ ${JSON.stringify(formattedData, null, 2)}
         this.logger.warn(`생성된 HTML이 너무 짧습니다 (${parsed.htmlBody?.length || 0}자)`);
       }
 
+      // 날짜 검증: Gemini가 잘못된 날짜를 생성했는지 확인
+      const expectedYearMonth = `${year}년 ${month}월`;
+
+      if (!parsed.title.includes(expectedYearMonth)) {
+        this.logger.warn(
+          `Gemini가 잘못된 날짜로 제목 생성: ${parsed.title}. 올바른 날짜로 수정합니다.`,
+        );
+        parsed.title = `${year}년 ${month}월 ${weekOfMonth}째주 알뜰폰 요금제 추천 TOP 35 (${month}월 ${day}일 수정)`;
+      }
+
       this.logger.log(`블로그 생성 완료: ${parsed.title}`);
+
+      // CSS 자동 삽입
+      const htmlWithCss = this.injectTableCss(parsed.htmlBody);
 
       return {
         title: parsed.title,
-        htmlBody: parsed.htmlBody,
+        htmlBody: htmlWithCss,
         tags: parsed.tags || ['알뜰폰', '요금제', '가성비', '무제한', '네비게이션용', '프로모션'],
         description: parsed.description || `${year}년 ${month}월 최신 알뜰폰 요금제 7가지 카테고리별 비교`,
       };
@@ -900,9 +951,12 @@ ${JSON.stringify(formattedData, null, 2)}
       const weekOfMonthFallback = this.getWeekOfMonth(nowFallback);
       const dayFallback = nowFallback.getDate();
 
+      const fallbackHtml = this.buildFallbackHtml(mergedResults);
+      const fallbackHtmlWithCss = this.injectTableCss(fallbackHtml);
+
       return {
         title: `${yearFallback}년 ${monthFallback}월 ${weekOfMonthFallback}째주 알뜰폰 요금제 추천 TOP 35 (${monthFallback}월 ${dayFallback}일 수정)`,
-        htmlBody: this.buildFallbackHtml(mergedResults),
+        htmlBody: fallbackHtmlWithCss,
         tags: ['알뜰폰', '요금제', '가성비', '무제한', '보조폰', '네비게이션용', '프로모션'],
         description: `${yearFallback}년 ${monthFallback}월 최신 알뜰폰 요금제 7가지 카테고리별 비교 분석`,
       };
@@ -1070,7 +1124,149 @@ ${JSON.stringify(formattedData, null, 2)}
   }
 
   /**
-   * 4️⃣ Claude 스타일 HTML 후처리 (AI 느낌 제거)
+   * 4️⃣-1 테이블 가독성 향상 CSS 자동 삽입
+   *
+   * Gemini가 생성한 HTML에 테이블 스타일링 CSS를 자동으로 추가
+   *
+   * 수행 내용:
+   * - <head> 태그가 존재하면 그 안에 <style> 삽입
+   * - <head>가 없으면 HTML 맨 위에 <style> 블록 추가
+   * - HTML 콘텐츠(body)는 변경하지 않음
+   *
+   * @param html Gemini가 생성한 원본 HTML
+   * @returns CSS가 삽입된 HTML
+   */
+  private injectTableCss(html: string): string {
+    this.logger.log('테이블 CSS 자동 삽입 시작...');
+
+    const cssContent = `
+.plan-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2em 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  border: 1px solid #e5e7eb;
+  table-layout: fixed;
+  word-break: keep-all;
+  overflow-x: auto;
+  display: block;
+}
+
+.plan-table th,
+.plan-table td {
+  border: 1px solid #e5e7eb;
+  padding: 6px 8px;
+  text-align: center;
+  vertical-align: middle;
+  white-space: normal !important;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.plan-table thead th {
+  background-color: #f9fafb;
+  font-weight: 600;
+  color: #111827;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  font-size: 13px;
+}
+
+.plan-table tbody tr:nth-child(even) {
+  background-color: #fdfdfd;
+}
+
+.plan-table tbody tr:hover {
+  background-color: #f0f9ff;
+}
+
+.carrier-sep {
+  background-color: #f3f4f6;
+  font-weight: bold;
+  text-align: left !important;
+  padding: 6px 8px;
+  color: #111827;
+  font-size: 13px;
+}
+
+.plan-table td:first-child,
+.plan-table th:first-child {
+  position: sticky;
+  left: 0;
+  background: white;
+  z-index: 1;
+}
+
+.plan-table td:last-child {
+  text-align: left;
+  line-height: 1.4;
+  min-width: 160px;
+  max-width: 280px;
+}
+
+@media screen and (max-width: 768px) {
+  .plan-table {
+    font-size: 11px;
+  }
+
+  .plan-table th, .plan-table td {
+    padding: 5px 4px;
+    white-space: normal !important;
+  }
+
+  .plan-table thead {
+    display: none;
+  }
+
+  .plan-table, .plan-table tbody, .plan-table tr, .plan-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .plan-table tr {
+    margin-bottom: 0.8em;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .plan-table td {
+    text-align: left;
+    padding: 5px 8px;
+    border: none;
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  .plan-table td:before {
+    content: attr(data-label);
+    display: block;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 2px;
+  }
+}
+`;
+
+    const styleTag = `<style>${cssContent}</style>`;
+
+    // <head> 태그가 존재하는지 확인
+    if (html.includes('<head>')) {
+      // <head> 태그 안에 삽입
+      return html.replace(/<head>/i, `<head>\n${styleTag}`);
+    } else if (html.includes('</head>')) {
+      // </head> 닫는 태그 바로 앞에 삽입
+      return html.replace(/<\/head>/i, `${styleTag}\n</head>`);
+    } else {
+      // <head>가 없으면 HTML 맨 위에 추가
+      return `${styleTag}\n${html}`;
+    }
+  }
+
+  /**
+   * 4️⃣-2 Claude 스타일 HTML 후처리 (AI 느낌 제거)
    *
    * Gemini가 생성한 HTML에서 AI 특유의 과장된 표현과 불필요한 강조를 제거하고
    * 자연스러운 블로그 문체로 정제

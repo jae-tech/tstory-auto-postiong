@@ -44,35 +44,35 @@ export class AutomationService {
   async runAutomation(): Promise<void> {
     const now = new Date();
     this.logger.log('='.repeat(60));
-    this.logger.log(`[Automation] Daily crawl started at ${now.toISOString()}`);
-    this.logger.log(`[Automation] KST: ${now.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`);
+    this.logger.log(`[자동화] 일일 크롤링 시작: ${now.toISOString()}`);
+    this.logger.log(`[자동화] KST: ${now.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`);
     this.logger.log('='.repeat(60));
 
     const startTime = Date.now();
 
     try {
       // 1단계: 크롤링 및 신규/변경 요금제 감지
-      this.logger.log('[Automation] Step 1/3: Running Crawler...');
+      this.logger.log('[자동화] 1단계/3: 크롤러 실행 중...');
       await this.crawlerService.runCrawlAndDetect();
-      this.logger.log('[Automation] Step 1/3: Crawler completed');
+      this.logger.log('[자동화] 1단계/3: 크롤러 완료');
 
       // 2단계: AI 분석 및 포스트 큐 생성
-      this.logger.log('[Automation] Step 2/3: Running Analyzer...');
+      this.logger.log('[자동화] 2단계/3: 분석기 실행 중...');
       await this.analyzerService.runFullAnalysis();
-      this.logger.log('[Automation] Step 2/3: Analyzer completed');
+      this.logger.log('[자동화] 2단계/3: 분석기 완료');
 
       // 3단계: 큐에서 대기 중인 포스트 발행
-      this.logger.log('[Automation] Step 3/3: Running Publisher...');
+      this.logger.log('[자동화] 3단계/3: 발행기 실행 중...');
       await this.publisherService.runPublisher();
-      this.logger.log('[Automation] Step 3/3: Publisher completed');
+      this.logger.log('[자동화] 3단계/3: 발행기 완료');
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
       this.logger.log('='.repeat(60));
-      this.logger.log(`[Automation] Daily automation completed successfully (${duration}s)`);
+      this.logger.log(`[자동화] 일일 자동화 성공적으로 완료 (${duration}초)`);
       this.logger.log('='.repeat(60));
     } catch (error) {
-      this.logger.error('[Automation] Error during daily run:', error);
+      this.logger.error('[자동화] 일일 실행 중 오류 발생:', error);
 
       // Prisma 트랜잭션 충돌 감지 및 재시도
       const errorMessage = error?.message || '';
@@ -82,20 +82,20 @@ export class AutomationService {
         errorMessage.includes('deadlock');
 
       if (isPrismaError) {
-        this.logger.warn('[Automation] Prisma transaction conflict detected');
-        this.logger.warn('[Automation] Retrying automation in 5 minutes...');
+        this.logger.warn('[자동화] Prisma 트랜잭션 충돌 감지');
+        this.logger.warn('[자동화] 5분 후 재시도 예정...');
 
         // 5분 후 재시도 (단 한 번만)
         setTimeout(
           () => {
-            this.logger.log('[Automation] Starting retry after 5 minutes...');
+            this.logger.log('[자동화] 5분 후 재시도 시작...');
             this.runAutomation();
           },
           5 * 60 * 1000,
         );
       } else {
-        this.logger.error('[Automation] Non-retryable error occurred');
-        this.logger.error('[Automation] Error stack:', error?.stack);
+        this.logger.error('[자동화] 재시도 불가능한 오류 발생');
+        this.logger.error('[자동화] 오류 스택:', error?.stack);
       }
     }
   }
@@ -111,14 +111,14 @@ export class AutomationService {
     message: string;
     duration: number;
   }> {
-    this.logger.log('[Automation] Manual trigger requested');
+    this.logger.log('[자동화] 수동 실행 요청됨');
     const startTime = Date.now();
 
     try {
       await this.runAutomation();
       const duration = Date.now() - startTime;
 
-      this.logger.log(`[Automation] Manual run completed successfully (${duration}ms)`);
+      this.logger.log(`[자동화] 수동 실행 성공적으로 완료 (${duration}ms)`);
 
       return {
         success: true,
@@ -128,11 +128,11 @@ export class AutomationService {
     } catch (error) {
       const duration = Date.now() - startTime;
 
-      this.logger.error(`[Automation] Manual run failed (${duration}ms):`, error);
+      this.logger.error(`[자동화] 수동 실행 실패 (${duration}ms):`, error);
 
       return {
         success: false,
-        message: `수동 파이프라인 실행 실패: ${error?.message || 'Unknown error'}`,
+        message: `수동 파이프라인 실행 실패: ${error?.message || '알 수 없는 오류'}`,
         duration,
       };
     }
