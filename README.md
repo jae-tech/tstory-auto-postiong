@@ -264,19 +264,19 @@ PUPPETEER_EXECUTABLE_PATH="/usr/bin/chromium"
 
 ```bash
 # 의존성 설치
-npm install
+pnpm install
 
 # Prisma Client 생성
-npm run prisma:generate
+pnpm run prisma:generate
 
 # 데이터베이스 마이그레이션
-npm run prisma:migrate
+pnpm run prisma:migrate
 ```
 
 ### 3. 개발 모드 실행
 
 ```bash
-npm run start:dev
+pnpm run start:dev
 ```
 
 ### 4. Docker로 프로덕션 실행
@@ -503,16 +503,16 @@ docker logs -f tstory-app
 
 ```bash
 # Prisma Studio (DB GUI)
-npm run prisma:studio
+pnpm run prisma:studio
 
 # 스키마 동기화
-npm run prisma:generate
+pnpm run prisma:generate
 
 # 마이그레이션 생성
-npm run prisma:migrate
+pnpm run prisma:migrate
 
 # DB 초기화 (개발 전용)
-npx prisma migrate reset
+pnpm exec prisma migrate reset
 ```
 
 ## 🐛 트러블슈팅
