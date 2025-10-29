@@ -1,6 +1,6 @@
 # Tstory - 알뜰폰 자동 포스팅 시스템
 
-> **개인 학습 프로젝트** | NestJS, Playwright, Gemini AI를 활용한 End-to-End 자동화 시스템 구축
+> NestJS, Playwright, Gemini AI를 활용한 End-to-End 자동화 시스템 구축
 
 ## 🎯 프로젝트 목표
 
@@ -17,7 +17,6 @@
 | 항목                  | 내용                                              |
 | --------------------- | ------------------------------------------------- |
 | **개발 기간**         | 2025년 10월 ~ 현재                                |
-| **코드 라인 수**      | 4,100+ lines (TypeScript)                         |
 | **구현 모듈**         | 8개 (Automation, Crawler, Analyzer, Publisher 등) |
 | **외부 API 연동**     | Gemini AI API (프롬프트 엔지니어링)               |
 | **자동화 파이프라인** | 크롤링 → AI 분석 → 발행 (완전 자동화)             |
@@ -650,22 +649,4 @@ DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public"
 2. AI 콘텐츠 생성: 1,000+ 라인 프롬프트 설계, JSON 검증
 3. 자동 발행 시스템: 세션 관리, 재시도 로직, 상태 추적
 4. 중앙 스케줄러: Cron 파이프라인, 트랜잭션 충돌 처리
-
-[코드]
-- GitHub: https://github.com/[your-username]/tstory
-- 4,100+ lines (TypeScript)
 ```
-
-## 📜 라이선스
-
-MIT License
-
-## 🤝 기여
-
-이슈 및 풀 리퀘스트 환영합니다!
-
----
-
-**개발 목적**: 백엔드 개발 실전 학습 (NestJS, Prisma, Playwright, AI API)
-**프로젝트 유형**: 개인 포트폴리오 프로젝트
-**배포 환경**: Docker 컨테이너 기반 클라우드 배포
