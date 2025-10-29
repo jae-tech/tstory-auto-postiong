@@ -10,14 +10,13 @@
 - **데이터베이스**: Prisma ORM을 활용한 타입 안전한 DB 설계 및 마이그레이션
 - **브라우저 자동화**: Playwright를 이용한 크롤링 및 UI 자동화
 - **AI API 통합**: Google Gemini API를 활용한 콘텐츠 생성 자동화
-- **인프라**: Docker 컨테이너화 및 OCI Ampere A1 (ARM64) 환경 배포
+- **인프라**: Docker 컨테이너화 및 클라우드 환경 배포
 
 ## 📊 개발 성과
 
 | 항목                  | 내용                                              |
 | --------------------- | ------------------------------------------------- |
-| **개발 기간**         | 2024년 11월 ~ 현재                                |
-| **총 커밋 수**        | 30+ commits                                       |
+| **개발 기간**         | 2025년 10월 ~ 현재                                |
 | **코드 라인 수**      | 4,100+ lines (TypeScript)                         |
 | **구현 모듈**         | 8개 (Automation, Crawler, Analyzer, Publisher 등) |
 | **외부 API 연동**     | Gemini AI API (프롬프트 엔지니어링)               |
@@ -66,8 +65,8 @@
 - ✅ **타입 안정성**: TypeScript + Prisma로 컴파일 타임 타입 체크
 - ✅ **확장 가능한 아키텍처**: 모듈 단위 설계로 기능 추가 용이
 - ✅ **에러 복구**: Graceful Degradation 및 재시도 로직
-- ✅ **ARM64 최적화**: OCI Ampere A1 Flex VM에서 네이티브 실행
-- ✅ **프로덕션 레디**: Docker 컨테이너화, 환경 변수 관리
+- ✅ **클라우드 배포**: Docker 컨테이너화로 플랫폼 독립적 실행
+- ✅ **프로덕션 레디**: 환경 변수 관리 및 스케줄링 자동화
 
 ## 🏗️ 기술 스택
 
@@ -77,7 +76,7 @@
 | **HTTP 서버**    | Fastify                    |
 | **스케줄러**     | @nestjs/schedule           |
 | **데이터베이스** | PostgreSQL + Prisma ORM    |
-| **크롤링/발행**  | Playwright (ARM64)         |
+| **크롤링/발행**  | Playwright                 |
 | **AI 분석**      | Google Gemini API          |
 | **빌드 도구**    | SWC, Webpack HMR           |
 | **테스트**       | Vitest                     |
@@ -123,14 +122,15 @@
 - 5분 후 자동 재시도 로직 구현
 - 순차적 워크플로우로 동시성 제어
 
-### 5. ARM64 환경 배포 최적화
+### 5. Docker 컨테이너 배포 최적화
 
-**문제**: OCI Ampere A1 (ARM64)에서 Playwright 실행 오류
+**문제**: 클라우드 환경에서 Playwright 브라우저 실행 오류
 **해결**:
 
-- ARM64 네이티브 Chromium 설치 설정
+- Chromium 브라우저 자동 설치 및 의존성 관리
 - Multi-stage Docker 빌드로 이미지 크기 최적화
 - 환경 변수 기반 설정 분리 (.env 활용)
+- 다양한 클라우드 플랫폼(AWS, GCP, OCI 등) 호환
 
 ## 📐 아키텍처
 
@@ -282,7 +282,7 @@ npm run start:dev
 ### 4. Docker로 프로덕션 실행
 
 ```bash
-# Docker 이미지 빌드 (ARM64)
+# Docker 이미지 빌드
 docker build -t tstory-automation .
 
 # 컨테이너 실행
@@ -564,15 +564,15 @@ await this.delay(2000); // 1초 → 2초로 증가
 
 ### 3. Playwright 브라우저 실행 오류
 
-**문제**: ARM64 환경에서 Chromium 실행 실패
+**문제**: Docker 컨테이너 환경에서 Chromium 실행 실패
 **해결**:
 
 ```bash
-# Dockerfile에서 ARM64 네이티브 Chromium 설치
-RUN apt-get update && apt-get install -y chromium
+# Dockerfile에서 Chromium 및 의존성 설치
+RUN npx playwright install --with-deps chromium
 
-# 환경 변수 설정
-ENV PLAYWRIGHT_EXECUTABLE_PATH=/usr/bin/chromium
+# 또는 시스템 패키지로 설치
+RUN apt-get update && apt-get install -y chromium
 ```
 
 ### 4. Prisma 연결 오류
@@ -636,14 +636,14 @@ DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public"
 - Database: PostgreSQL, Prisma ORM
 - Automation: Playwright, @nestjs/schedule
 - AI: Google Gemini API
-- DevOps: Docker, OCI Ampere A1 (ARM64)
+- DevOps: Docker, 클라우드 배포 (OCI)
 
 [주요 성과]
 - 크롤링부터 발행까지 완전 자동화 파이프라인 구축 (제로 개입)
 - Gemini API 프롬프트 엔지니어링으로 고품질 SEO 콘텐츠 자동 생성
 - Playwright 브라우저 자동화로 티스토리 발행 100% 성공률 달성
 - 배치 처리 최적화로 API 호출 70% 감소
-- ARM64 환경 Docker 배포 및 Cron 기반 일일 자동 실행
+- Docker 컨테이너화 및 클라우드 환경 배포, Cron 기반 일일 자동 실행
 
 [구현 내용]
 1. 웹 크롤링 시스템: 동적 페이지 스크래핑, 변경 감지 로직
@@ -654,7 +654,6 @@ DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public"
 [코드]
 - GitHub: https://github.com/[your-username]/tstory
 - 4,100+ lines (TypeScript)
-- 30+ commits
 ```
 
 ## 📜 라이선스
@@ -669,4 +668,4 @@ MIT License
 
 **개발 목적**: 백엔드 개발 실전 학습 (NestJS, Prisma, Playwright, AI API)
 **프로젝트 유형**: 개인 포트폴리오 프로젝트
-**배포 환경**: OCI Ampere A1 (ARM64) + Docker
+**배포 환경**: Docker 컨테이너 기반 클라우드 배포
